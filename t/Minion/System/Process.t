@@ -85,7 +85,7 @@ subtest 'wait' => sub {
     $process = Minion::System::Process->new(sub {
     });
 
-    $start = time(); 
+    $start = time();
     $process->wait();
     $t0 = time() - $start;
 
@@ -93,7 +93,7 @@ subtest 'wait' => sub {
 	usleep(100_000);
     });
 
-    $start = time(); 
+    $start = time();
     $process->wait();
     $t1 = time() - $start;
 
@@ -114,7 +114,7 @@ subtest 'trywait' => sub {
 
     is($process->exitstatus(), undef);
 
-    $start = time(); 
+    $start = time();
     $status = $process->trywait();
     $duration = time() - $start;
 
@@ -123,7 +123,7 @@ subtest 'trywait' => sub {
 
     usleep(150_000);
 
-    $start = time(); 
+    $start = time();
     $status = $process->trywait();
     $duration = time() - $start;
 
@@ -144,7 +144,7 @@ subtest 'trywait timeout' => sub {
 
     is($process->exitstatus(), undef);
 
-    $start = time(); 
+    $start = time();
     $status = $process->trywait(TIMEOUT => 0.050);
     $duration = time() - $start;
 
@@ -154,7 +154,7 @@ subtest 'trywait timeout' => sub {
 
     usleep(30_000);
 
-    $start = time(); 
+    $start = time();
     $status = $process->trywait(TIMEOUT => 0.050);
     $duration = time() - $start;
 
