@@ -129,6 +129,10 @@ sub set
     confess() if (!defined($value));
     confess() if (ref($value) ne '');
 
+    if (($key =~ /\n/ms) || ($key !~ /^[-_:0-9a-zA-Z]+$/ms)) {
+	return 0;
+    }
+
     $alias = $self->{__PACKAGE__()}->{_aliases}->{$key};
 
     if (defined($alias)) {
