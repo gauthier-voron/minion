@@ -8,7 +8,6 @@ use Carp qw(confess);
 use Cwd;
 use Scalar::Util qw(blessed);
 
-use Minion::Serializable;
 use Minion::System::Process;
 use Minion::System::Util qw(output_function);
 use Minion::Worker;
@@ -103,11 +102,11 @@ sub execute
 	}
     }
 
+    confess(join(' ', keys(%opts))) if (%opts);
+
     if (!defined($popts{STDIN})) {
 	$popts{STDIN} = '/dev/null';
     }
-
-    confess(join(' ', keys(%opts))) if (%opts);
 
     $home = $self->{__PACKAGE__()}->{_home};
 

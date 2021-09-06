@@ -187,26 +187,27 @@ $TESTS{'execute and redirect shell commands'} = sub
 
 $TESTS{'execute commands in parallel workers'} = sub
 {
-    plan tests => 6;
+    plan tests => 4;
 
     my ($worker0, $worker1) = @_;
-    my ($p0, $p1, $start, $s0, $s1, $dur);
+    my ($p0, $p1, $s0, $s1);
+    my ($pin, $pout);
 
-    $p0 = $worker0->execute(['sleep', '0.2']);
+    pipe($pin, $pout);
+
+    $p0 = $worker0->execute(['cat'], STDIN => $pin);
     $p1 = $worker1->execute(['sleep', '0.2']);
 
     ok(defined($p0));
     ok(defined($p1));
 
-    $start = time();
+    close($pin);
 
-    $s0 = $p0->wait();
     $s1 = $p1->wait();
 
-    $dur = time() - $start;
+    close($pout);
 
-    ok($dur >= 0.2);
-    ok($dur < 0.4);
+    $s0 = $p0->wait();
 
     is($s0, 0);
     is($s1, 0);
