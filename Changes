@@ -1,0 +1,6 @@
+Revision history for Perl extension Minion.
+
+0.01  Mon Jun 14 14:05:49 2021
+	- original version; created by h2xs 1.23 with options
+		-AX --skip-exporter --use-new-tests -n Minion
+
