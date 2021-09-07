@@ -23,43 +23,7 @@ my $CONFIG_PATH = '.config/test-aws.conf';
 
 # The configuration once loaded.
 #
-my $config;
-
-# Load the configuration from a file if it exists.
-#
-if (-f $CONFIG_PATH) {
-    $config = Minion::TestConfig->load($CONFIG_PATH);
-
-    if (!defined($config)) {
-	exit(1);
-    }
-}
-
-# Load the parameters with the specified names from the given configuration.
-# If the configuration is not initialized or if one of the parameters cannot be
-# found, then skip exactly one test.
-# Otherwise, return a hash with the keys being the given names and the values
-# being the associated parameters.
-#
-sub from_config
-{
-    my ($config, @names) = @_;
-    my ($name, %params);
-
-    if (!defined($config)) {
-	skip('no aws config', 1);
-    }
-
-    foreach $name (@names) {
-	if (!$config->has($name)) {
-	    skip("no '$name' in aws config", 1);
-	}
-
-	$params{$name} = $config->get($name);
-    }
-
-    return %params;
-}
+my $config = Minion::TestConfig->load($CONFIG_PATH);
 
 
 # Test utilities ==============================================================
@@ -178,7 +142,9 @@ sub has_logger
 # request_spot_fleet ----------------------------------------------------------
 
 SKIP: {
-    my %params = from_config($config, qw(default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        default_image default_type
+    ));
 
     subtest 'request_spot_fleet (simple)' => sub {
 	if ($test_summary{'request_spot_fleet'}) {
@@ -219,7 +185,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
         alt_image alt_type alt_price alt_ssh alt_region alt_secgroup alt_user
     ));
 
@@ -273,7 +239,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        default_image default_type
+    ));
 
     subtest 'request_spot_fleet (invalid)' => sub {
 	if ($test_summary{'request_spot_fleet'}) {
@@ -387,7 +355,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(default_type));
 
     subtest 'request_spot_fleet (err)' => sub {
 	if ($test_summary{'request_spot_fleet'}) {
@@ -409,7 +377,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(default_type));
 
     subtest 'request_spot_fleet (log)' => sub {
 	if ($test_summary{'request_spot_fleet'}) {
@@ -433,7 +401,9 @@ SKIP: {
 # cancel_spot_fleet_requests --------------------------------------------------
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'cancel_spot_fleet_requests (simple)' => sub {
 	if ($test_summary{'cancel_spot_fleet_requests'}) {
@@ -462,7 +432,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        default_image default_type
+    ));
 
     subtest 'cancel_spot_fleet_requests (invalid)' => sub {
 	if ($test_summary{'cancel_spot_fleet_requests'}) {
@@ -500,7 +472,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
         timeout alt_image alt_type alt_region
     ));
 
@@ -549,7 +521,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'cancel_spot_fleet_requests (many)' => sub {
 	if ($test_summary{'cancel_spot_fleet_requests'}) {
@@ -628,7 +602,9 @@ SKIP: {
 # describe_spot_fleet_requests ------------------------------------------------
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_requests (simple)' => sub {
 	if ($test_summary{'describe_spot_fleet_requests'}) {
@@ -671,7 +647,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_requests (invalid)' => sub {
 	if ($test_summary{'describe_spot_fleet_requests'}) {
@@ -731,7 +709,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
         timeout alt_image alt_type alt_region
     ));
 
@@ -782,7 +760,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_requests (query)' => sub {
 	if ($test_summary{'describe_spot_fleet_requests'}) {
@@ -819,7 +799,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_requests (many)' => sub {
 	if ($test_summary{'describe_spot_fleet_requests'}) {
@@ -886,7 +868,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_requests (log)' => sub {
 	if ($test_summary{'describe_spot_fleet_requests'}) {
@@ -919,7 +903,9 @@ SKIP: {
 # describe_spot_fleet_instances -----------------------------------------------
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_instances (simple)' => sub {
 	if ($test_summary{'describe_spot_fleet_instances'}) {
@@ -967,7 +953,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_instances (invalid)' => sub {
 	if ($test_summary{'describe_spot_fleet_instances'}) {
@@ -1024,7 +1012,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
         timeout alt_image alt_type alt_region
     ));
 
@@ -1087,7 +1075,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_instances (query)' => sub {
 	if ($test_summary{'describe_spot_fleet_instances'}) {
@@ -1157,7 +1147,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_instances (log)' => sub {
 	if ($test_summary{'describe_spot_fleet_instances'}) {
@@ -1190,7 +1182,9 @@ SKIP: {
 # describe_instances ==========================================================
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_instances (simple)' => sub {
 	if ($test_summary{'describe_instances'}) {
@@ -1244,7 +1238,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_instances (invalid)' => sub {
 	if ($test_summary{'describe_instances'}) {
@@ -1332,7 +1328,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_instances (filter)' => sub {
 	if ($test_summary{'describe_instances'}) {
@@ -1379,7 +1377,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
  SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_instances (query)' => sub {
 	if ($test_summary{'describe_instances'}) {
@@ -1429,7 +1429,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
  SKIP: {
-    my %params = from_config($config, qw(
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
         timeout alt_image alt_type alt_region
     ));
 
@@ -1514,7 +1514,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_instances (log)' => sub {
 	if ($test_summary{'describe_instances'}) {
@@ -1560,7 +1562,9 @@ SKIP: {
 # describe_spot_fleet_request_history -----------------------------------------
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_request_history (simple)' => sub {
 	if ($test_summary{'describe_spot_fleet_request_history'}) {
@@ -1600,7 +1604,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_request_history (invalid)' => sub {
 	if ($test_summary{'describe_spot_fleet_request_history'}) {
@@ -1682,7 +1688,9 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout default_image default_type));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        timeout default_image default_type
+    ));
 
     subtest 'describe_spot_fleet_request_history (query)' => sub {
 	if ($test_summary{'describe_spot_fleet_request_history'}) {
@@ -1726,7 +1734,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
         timeout alt_image alt_type alt_region
     ));
 
@@ -1778,7 +1786,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(timeout));
 
     subtest 'describe_spot_fleet_request_history (err)' => sub {
 	if ($test_summary{'describe_spot_fleet_request_history'}) {
@@ -1800,7 +1808,7 @@ SKIP: {
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 SKIP: {
-    my %params = from_config($config, qw(timeout));
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(timeout));
 
     subtest 'describe_spot_fleet_request_history (log)' => sub {
 	if ($test_summary{'describe_spot_fleet_request_history'}) {
