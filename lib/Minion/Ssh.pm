@@ -7,8 +7,8 @@ use warnings;
 use Carp qw(confess);
 use Scalar::Util qw(blessed);
 
+use Minion::Io::Util qw(output_function);
 use Minion::System::Process;
-use Minion::System::Util qw(output_function);
 use Minion::Worker;
 
 

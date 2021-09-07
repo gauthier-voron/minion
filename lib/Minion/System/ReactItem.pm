@@ -6,7 +6,7 @@ use warnings;
 use Carp qw(confess);
 use Scalar::Util qw(blessed);
 
-use Minion::System::Handle;
+use Minion::Io::Handle;
 
 
 sub new
@@ -24,7 +24,7 @@ sub _init
     confess() if (@err);
     confess() if (!defined($handle));
     confess() if (!defined($code));
-    confess() if (!blessed($handle)||!$handle->isa('Minion::System::Handle'));
+    confess() if (!blessed($handle)||!$handle->isa('Minion::Io::Handle'));
     confess() if (ref($code) ne 'CODE');
 
     $self->{__PACKAGE__()}->{_handle} = $handle;

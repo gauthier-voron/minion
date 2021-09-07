@@ -10,7 +10,7 @@ use POSIX ":sys_wait_h";
 use Scalar::Util qw(blessed);
 use Time::HiRes;
 
-use Minion::System::Handle;
+use Minion::Io::Handle;
 use Minion::System::ReactItem;
 
 
@@ -46,7 +46,7 @@ sub _add_react
     my ($self, $fh, $code, $selset) = @_;
     my ($handle, $ritem, $fileno);
 
-    $handle = Minion::System::Handle->new($fh);
+    $handle = Minion::Io::Handle->new($fh);
     $handle->autoflush(1);
     $handle->blocking(0);
 

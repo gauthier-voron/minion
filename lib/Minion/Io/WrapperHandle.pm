@@ -1,13 +1,13 @@
-package Minion::System::WrapperHandle;
+package Minion::Io::WrapperHandle;
 
-use parent qw(Minion::System::Handle);
+use parent qw(Minion::Io::Handle);
 use strict;
 use warnings;
 
 use Carp qw(confess);
 use Fcntl;
 
-use Minion::System::Handle;
+use Minion::Io::Handle;
 
 
 sub _init
