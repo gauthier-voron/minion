@@ -1,4 +1,4 @@
-package Minion::System::Handle;
+package Minion::Io::Handle;
 
 use strict;
 use warnings;
@@ -7,8 +7,8 @@ use Carp qw(confess);
 use Fcntl;
 use Scalar::Util qw(blessed);
 
-use Minion::System::GlobHandle;
-use Minion::System::WrapperHandle;
+use Minion::Io::GlobHandle;
+use Minion::Io::WrapperHandle;
 
 
 sub new
@@ -26,7 +26,7 @@ sub _init
     confess() if (!defined($fh));
 
     if (ref($fh) eq 'GLOB') {
-	return Minion::System::GlobHandle->new($fh, @args);
+	return Minion::Io::GlobHandle->new($fh, @args);
     }
 
     if (blessed($fh)) {
@@ -34,7 +34,7 @@ sub _init
 	    return $fh;
 	}
 	if ($fh->isa('IO::Handle')) {
-	    return Minion::System::WrapperHandle->new($fh, @args);
+	    return Minion::Io::WrapperHandle->new($fh, @args);
 	}
     }
 

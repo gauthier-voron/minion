@@ -1,6 +1,6 @@
-package Minion::System::GlobHandle;
+package Minion::Io::GlobHandle;
 
-use parent qw(Minion::System::Handle);
+use parent qw(Minion::Io::Handle);
 use strict;
 use warnings;
 
@@ -8,7 +8,7 @@ use Carp qw(confess);
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use Scalar::Util qw(openhandle);
 
-use Minion::System::Handle;
+use Minion::Io::Handle;
 
 
 sub _init

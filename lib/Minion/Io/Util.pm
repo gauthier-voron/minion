@@ -1,4 +1,4 @@
-package Minion::System::Util;
+package Minion::Io::Util;
 
 use strict;
 use warnings;
