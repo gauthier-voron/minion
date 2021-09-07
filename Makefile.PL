@@ -11,5 +11,5 @@ WriteMakefile(
     #LICENSE           => 'perl',
     #Value must be from legacy list of licenses here
     #https://metacpan.org/pod/Module::Build::API
-    test              => { TESTS => 't/Minion/*/*.t' },
+    test              => { TESTS => 't/Minion/*.t t/Minion/*/*.t' },
 );
