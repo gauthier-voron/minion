@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 use File::Temp qw(tempfile);
-use Test::More tests => 39;
+use Test::More tests => 45;
 
 use Minion::TestConfig;
 use Minion::System::Pgroup;
@@ -34,6 +34,7 @@ my $config = Minion::TestConfig->load($CONFIG_PATH);
 my %test_summary = (
     'request_spot_fleet'                  => 1,
     'cancel_spot_fleet_requests'          => 1,
+    'describe_security_groups'            => 1,
     'describe_spot_fleet_requests'        => 1,
     'describe_spot_fleet_instances'       => 1,
     'describe_instances'                  => 1,
@@ -590,6 +591,181 @@ SKIP: {
 		return Minion::Aws::Cli->cancel_spot_fleet_requests(
 		    [ 'sfr-00000000-0000-0000-0000-000000000000' ],
 		    LOG => $logger
+		    );
+	    });
+	} else {
+	    plan skip_all => 'test disabled (dev only)';
+	}
+    };
+}
+
+
+# describe_security_groups ----------------------------------------------------
+
+SKIP: {
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        default_secgroup
+    ));
+
+    subtest 'describe_security_groups (simple)' => sub {
+	if ($test_summary{'describe_security_groups'}) {
+	    plan tests => 9;
+	} else {
+	    plan skip_all => 'test disabled (dev only)';
+	}
+
+	my ($describe, $result);
+
+	$describe = Minion::Aws::Cli->describe_security_groups();
+
+	ok($describe);
+	ok(Minion::System::Future->comply($describe));
+	is($describe->out(), undef);
+	ok($result = $describe->get());
+	is(ref($result), 'HASH');
+	is(ref($result->{'SecurityGroups'}), 'ARRAY');
+	ok(!grep { ref($_) ne 'HASH' } @{$result->{'SecurityGroups'}});
+	ok(!grep { ref($_->{'GroupId'}) ne '' }
+	   @{$result->{'SecurityGroups'}});
+	ok(grep { $_->{'GroupId'} eq $params{'default_secgroup'} }
+	   @{$result->{'SecurityGroups'}});
+    };
+}
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+SKIP: {
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        default_secgroup
+    ));
+
+    subtest 'describe_security_groups (ids)' => sub {
+	if ($test_summary{'describe_security_groups'}) {
+	    plan tests => 7;
+	} else {
+	    plan skip_all => 'test disabled (dev only)';
+	}
+
+	my ($describe, $result);
+
+	$describe = Minion::Aws::Cli->describe_security_groups(
+	    IDS => [ $params{'default_secgroup'} ]
+	    );
+
+	ok($describe);
+	ok($result = $describe->get());
+
+	is(ref($result), 'HASH');
+	is(ref($result->{'SecurityGroups'}), 'ARRAY');
+	is(scalar(@{$result->{'SecurityGroups'}}), 1);
+	is(ref($result->{'SecurityGroups'}->[0]), 'HASH');
+	is($result->{'SecurityGroups'}->[0]->{'GroupId'},
+	   $params{'default_secgroup'});
+    };
+}
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+SKIP: {
+    subtest 'describe_security_groups (invalid)' => sub {
+	if ($test_summary{'describe_security_groups'}) {
+	    plan tests => 4;
+	} else {
+	    plan skip_all => 'test disabled (dev only)';
+	}
+
+	my ($describe, $result);
+
+	$describe = Minion::Aws::Cli->describe_security_groups(
+	    ERR => sub {},
+	    IDS => [ 'sg-000000000000' ]
+	    );
+
+	ok($describe);
+	ok(!defined($describe->get()));
+
+	dies_ok(sub {Minion::Aws::Cli->describe_security_groups(
+			 IDS => [ 'Bad Format' ])});
+
+	dies_ok(sub {Minion::Aws::Cli->describe_security_groups(
+			 IDS => 'Bad Type')});
+    };
+}
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+SKIP: {
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        alt_secgroup alt_region
+    ));
+
+    subtest 'describe_security_groups (region)' => sub {
+	if ($test_summary{'describe_security_groups'}) {
+	    plan tests => 7;
+	} else {
+	    plan skip_all => 'test disabled (dev only)';
+	}
+
+	my ($describe, $result);
+
+	$describe = Minion::Aws::Cli->describe_security_groups(
+	    IDS    => [ $params{'alt_secgroup'} ],
+	    REGION => $params{'alt_region'}
+	    );
+
+	ok($describe);
+	ok($result = $describe->get());
+
+	is(ref($result), 'HASH');
+	is(ref($result->{'SecurityGroups'}), 'ARRAY');
+	is(scalar(@{$result->{'SecurityGroups'}}), 1);
+	is(ref($result->{'SecurityGroups'}->[0]), 'HASH');
+	is($result->{'SecurityGroups'}->[0]->{'GroupId'},
+	   $params{'alt_secgroup'});
+    };
+}
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+SKIP: {
+    my %params = $config->params(sub { skip(shift(), 1); }, qw(
+        default_secgroup
+    ));
+
+    subtest 'describe_security_groups (query)' => sub {
+	if ($test_summary{'describe_security_groups'}) {
+	    plan tests => 5;
+	} else {
+	    plan skip_all => 'test disabled (dev only)';
+	}
+
+	my ($describe, $result);
+
+	$describe = Minion::Aws::Cli->describe_security_groups(
+	    QUERY => 'SecurityGroups[*].GroupId'
+	    );
+
+	ok($describe);
+	ok($result = $describe->get());
+
+	is(ref($result), 'ARRAY');
+	ok(!grep { ref($_) ne '' } @$result);
+	ok(grep { $_ eq $params{'default_secgroup'} } @$result);
+    };
+}
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+SKIP: {
+    subtest 'describe_security_groups (err)' => sub {
+	if ($test_summary{'describe_security_groups'}) {
+	    has_logger(sub {
+		my ($logger) = @_;
+
+		return Minion::Aws::Cli->describe_security_groups(
+		    IDS    => [ 'sg-000000000000' ],
+		    ERR    => $logger,
+		    REGION => 'no-where-0'
 		    );
 	    });
 	} else {
