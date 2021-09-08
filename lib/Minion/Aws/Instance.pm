@@ -70,10 +70,10 @@ sub _init
     return $self->SUPER::_init(
 	$public_ip,
 	ALIASES => {
-	    'ec2:id'         => sub { return $self->id() },
-	    'ec2:public_ip'  => sub { return $self->public_ip() },
-	    'ec2:private_ip' => sub { return $self->private_ip() },
-	    'ec2:region'     => sub { return $self->region() }
+	    'aws:id'         => sub { return $self->id() },
+	    'aws:public-ip'  => sub { return $self->public_ip() },
+	    'aws:private-ip' => sub { return $self->private_ip() },
+	    'aws:region'     => sub { return $self->region() }
 	}, %sopts);
 }
 

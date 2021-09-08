@@ -20,7 +20,7 @@ sub _init
     confess() if (!defined($addr));
     confess() if (ref($addr) ne '');
 
-    $self->{__PACKAGE__()}->{_addr} = $addr;
+    $self->{__PACKAGE__()}->{_host} = $addr;
 
     if (defined($value = $opts{ALIASES})) {
 	confess() if (ref($value) ne 'HASH');
@@ -76,7 +76,7 @@ sub _init
     $self->{__PACKAGE__()}->{_sshcmd} = \@sshcmd;
 
     return $self->SUPER::_init(ALIASES => {
-	'ssh:addr' => sub { return $self->addr(); },
+	'ssh:host' => sub { return $self->host(); },
 	'ssh:port' => sub { return $self->port(); },
 	'ssh:user' => sub { return $self->user(); },
 	%aliases
@@ -94,13 +94,13 @@ sub _log
 }
 
 
-sub addr
+sub host
 {
     my ($self, @err) = @_;
 
     confess() if (@err);
 
-    return $self->{__PACKAGE__()}->{_addr};
+    return $self->{__PACKAGE__()}->{_host};
 }
 
 sub port
