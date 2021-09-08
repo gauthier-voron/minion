@@ -16,12 +16,24 @@ sub new
 
 sub _init
 {
-    my ($self, $values, @err) = @_;
+    my ($self, $values, %opts) = @_;
+    my ($value);
 
-    confess() if (@err);
     confess() if (!defined($values));
     confess() if (ref($values) ne 'HASH');
     confess() if (grep { ref($_) ne '' } values(%$values));
+
+    if (defined($value = $opts{NOLOAD})) {
+	$self->{__PACKAGE__()}->{_noload} = $value;
+	delete($opts{NOLOAD});
+    }
+
+    if (defined($value = $opts{PATH})) {
+	$self->{__PACKAGE__()}->{_path} = $value;
+	delete($opts{PATH});
+    }
+
+    confess(join(' ', keys(%opts))) if (%opts);
 
     $self->{__PACKAGE__()}->{_values} = { %$values };
 
@@ -114,8 +126,10 @@ sub load
     }
 
     if (!open($fh, '<', $path)) {
-	$ehandler->($path, 0, $!);
-	return undef;
+	return $class->new(
+	    {}, PATH => $path,
+	    NOLOAD => sprintf("%s: cannot open file: %s\n", $path, $!)
+	    );
     }
 
     $ln = 0;
@@ -130,7 +144,11 @@ sub load
 	if (!defined($tokens)) {
 	    close($fh);
 	    $ehandler->($path, $ln, $line);
-	    return undef;
+	    return $class->new(
+		{}, PATH => $path,
+		NOLOAD => sprintf("%s:%d: syntax error: '%s'\n",
+				  $path, $ln, $line)
+		);
 	}
 
 	if (scalar(@$tokens) == 0) {
@@ -140,7 +158,11 @@ sub load
 	if ((scalar(@$tokens) < 2) || (scalar(@$tokens) > 3)) {
 	    close($fh);
 	    $ehandler->($path, $ln, $line);
-	    return undef;
+	    return $class->new(
+		{}, PATH => $path,
+		NOLOAD => sprintf("%s:%d: syntax error: '%s'\n",
+				  $path, $ln, $line)
+		);
 	}
 
 	$key = $tokens->[0];
@@ -156,7 +178,7 @@ sub load
 
     close($fh);
 
-    return $class->new(\%values);
+    return $class->new(\%values, PATH => $path);
 }
 
 
@@ -168,7 +190,7 @@ sub has
     confess() if (!defined($name));
     confess() if (ref($name) ne '');
     
-    return exists($self->{__PACKAGE__()}->{_values});
+    return exists($self->{__PACKAGE__()}->{_values}->{$name});
 }
 
 sub get
@@ -182,32 +204,38 @@ sub get
     return $self->{__PACKAGE__()}->{_values}->{$name};
 }
 
-
-sub from_path
+sub params
 {
-    my ($class, $path, @names) = @_;
-    my ($config, $name, %params);
+    my ($self, $handler, @names) = @_;
+    my (%ret, $path, $noload, $name);
 
-    confess() if (!defined($path));
-    confess() if (ref($path) ne '');
-    confess() if (scalar(@names) == 0);
+    confess() if (!defined($handler));
+    confess() if (ref($handler) ne 'CODE');
+    confess() if (scalar(@names) < 1);
     confess() if (grep { ref($_) ne '' } @names);
 
-    $config = __PACKAGE__()->load($path);
+    $path = $self->{__PACKAGE__()}->{_path};
+    $noload = $self->{__PACKAGE__()}->{_noload};
 
-    if (!defined($config)) {
-	return "cannot load config from '$path'";
+    if (defined($noload)) {
+	$handler->($noload);
+	return %ret;
     }
 
     foreach $name (@names) {
-	if (!$config->has($name)) {
-	    return "cannot find parameter '$name' in '$path'";
+	if (!$self->has($name)) {
+	    if (defined($path)) {
+		$handler->("cannot find parameter '$name' in '$path'");
+	    } else {
+		$handler->("cannot find parameter '$name' in configuration");
+	    }
+	    return %ret;
 	}
 
-	$params{$name} = $config->get($name);
+	$ret{$name} = $self->get($name);
     }
 
-    return \%params;
+    return %ret;
 }
 
 
