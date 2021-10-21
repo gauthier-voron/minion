@@ -1,0 +1,209 @@
+#!/bin/bash
+#
+#   diablo-worker - run diablo on a worker node
+#
+#   Assume diablo is installed on the current environment under the path
+#   "$HOME/install/diablo" and deployed under the path "$HOME/deploy/diablo".
+#
+#   Depending on the worker role defined during deployment, start or stop a
+#   diablo primary or secondary node.
+#
+
+set -e
+
+script_name='diablo-worker'
+install_root="${HOME}/install/diablo"
+deploy_root="${HOME}/deploy/diablo"
+
+primaryfile="${deploy_root}/primary"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 <role> <action>"
+    echo
+    echo "If the role of the currently deployed diablo node is <role>, then"
+    echo "execute the specified <action>."
+    echo
+    echo "The role is either 'primary', 'secondary' or 'any'."
+    echo "The action is either 'start' or 'stop'."
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find diablo install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}:${PATH}"
+
+    if ! command -v 'diablo' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find diablo executable in '${install_root}'"
+    fi
+}
+
+
+# Primary node  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+start_primary() {
+    local pid port
+
+    port="$(cat "${primaryfile}" | head -n1 | sed -r 's/^.*://' || \
+            fatal "cannot find primary file '${primaryfile}'")"
+
+    diablo primary \
+        --config="${install_root}/scripts/sample/workloads/test-workload.yml"\
+        --chain-config="${deploy_root}/chain.yml" \
+	--addr="0.0.0.0:${port}" \
+	--level='DEBUG' \
+	> "${deploy_root}/out" \
+	2> "${deploy_root}/err" &
+    pid=$!
+
+    echo ${pid} > "${deploy_root}/pid"
+
+    sleep 2
+}
+
+stop_primary() {
+    local pid
+
+    if [ ! -e "${deploy_root}/pid" ] ; then
+	return 0
+    fi
+
+    pid="$(cat "${deploy_root}/pid")"
+
+    if ! echo "${pid}" | grep -Pq '^\d+$' ; then
+	fatal "cannot kill diablo primary with pid '${pid}'"
+    fi
+
+    kill ${pid} 2> '/dev/null' || true
+
+    rm "${deploy_root}/pid"
+
+    echo "--"
+    cat "${deploy_root}/out"
+    echo "--"
+    cat "${deploy_root}/err"
+}
+
+
+# Secondary node  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+start_secondary() {
+    local pid addr
+
+    addr="$(cat "${primaryfile}" | head -n1 || \
+            fatal "cannot find primary file '${primaryfile}'")"
+
+    diablo secondary \
+	-m "${addr}" \
+        --config="${install_root}/scripts/sample/workloads/test-workload.yml"\
+	--chain-config="${deploy_root}/chain.yml" \
+	--level='DEBUG' \
+	--timeout=2 \
+	> "${deploy_root}/out" \
+	2> "${deploy_root}/err" &
+    pid=$!
+
+    echo ${pid} > "${deploy_root}/pid"
+}
+
+stop_secondary() {
+    local pid
+
+    if [ ! -e "${deploy_root}/pid" ] ; then
+	return 0
+    fi
+
+    pid="$(cat "${deploy_root}/pid")"
+
+    if ! echo "${pid}" | grep -Pq '^\d+$' ; then
+	fatal "cannot kill diablo secondary with pid '${pid}'"
+    fi
+
+    kill ${pid} 2> '/dev/null' || true
+
+    rm "${deploy_root}/pid"
+
+    sleep 1
+    echo "--"
+    cat "${deploy_root}/out"
+    echo "--"
+    cat "${deploy_root}/err"
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+setup_environment
+
+if [ $# -lt 1 ] ; then
+    fatal "missing role operand"
+elif [ $# -lt 2 ] ; then
+    fatal "missing action operand"
+fi
+
+role="$1" ; shift
+action="$1" ; shift
+
+node_role="$(cat "${deploy_root}/role" 2> '/dev/null' || true)"
+
+if [ "x${node_role}" = 'x' ] ; then
+    exit 0
+fi
+
+case "${role}" in
+    'any')
+	true
+	;;
+    'primary'|'secondary')
+	if [ "${role}" != "${node_role}" ] ; then
+	    exit 0
+	fi
+	;;
+    *)
+	fatal "unknown role '${role}'"
+	;;
+esac
+
+case "${action}" in
+    'start')
+	case "${node_role}" in
+	    'primary')
+		start_primary "$@"
+		;;
+	    'secondary')
+		start_secondary "$@"
+		;;
+	    *)
+		fatal "unknown role '${role}'"
+		;;
+	esac
+	;;
+    'stop')
+	case "${node_role}" in
+	    'primary')
+		stop_primary "$@"
+		;;
+	    'secondary')
+		stop_secondary "$@"
+		;;
+	    *)
+		fatal "unknown role '${role}'"
+		;;
+	esac
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac
