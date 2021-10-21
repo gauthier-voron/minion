@@ -1,0 +1,13 @@
+#!/bin/bash
+#
+#   prepare-install - prepare an apt based system to install packages
+#
+
+set -e
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+sudo -n apt-get update -yy
