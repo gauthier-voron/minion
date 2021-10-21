@@ -76,7 +76,7 @@ sub _log
 	return 0;
     }
 
-    $log->($msg);
+    $log->($msg . "\n");
 
     return 1;
 }
