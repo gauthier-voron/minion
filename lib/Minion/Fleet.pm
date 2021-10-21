@@ -57,26 +57,42 @@ sub _init
 sub execute
 {
     my ($self, $cmd, %opts) = @_;
-    my (%mopts, $opt, $value, @members, $member, $ret, $proc);
+    my (@members, $member, $opt, $value, $i);
+    my ($ret, $proc, @moptss, $mopts);
 
     confess() if (!defined($cmd));
     confess() if (ref($cmd) ne 'ARRAY');
     confess() if (grep { ref($_) ne '' } @$cmd);
 
+    @members = $self->members();
+
+    foreach $member (@members) {
+	push(@moptss, {});
+    }
+
     foreach $opt (qw(STDIN STDOUT STDERR)) {
-	if (defined($value = $opts{$opt})) {
-	    $mopts{$opt} = $value;
-	    delete($opts{$opt});
+	if (defined($value = $opts{$opt . 'S'})) {
+	    if (ref($value) eq 'ARRAY') {
+		confess() if (scalar(@$value) != scalar(@members));
+		for ($i = 0; $i < scalar(@$value); $i++) {
+		    $moptss[$i]->{$opt} = $value->[$i];
+		}
+	    } else {
+		for ($i = 0; $i < scalar(@members); $i++) {
+		    $moptss[$i]->{$opt} = $value;
+		}
+	    }
+	    delete($opts{$opt . 'S'});
 	}
     }
 
     confess(join(' ', keys(%opts))) if (%opts);
 
-    @members = $self->members();
     $ret = Minion::System::Pgroup->new([]);
 
     foreach $member (@members) {
-	$proc = $member->execute($cmd, %mopts);
+	$mopts = shift(@moptss);
+	$proc = $member->execute($cmd, %$mopts);
 	$ret->add($proc);
     }
 
