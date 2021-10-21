@@ -1,0 +1,79 @@
+#!/bin/bash
+#
+#   deploy-diablo-worker - deploy diablo on a worker node
+#
+#   Assume diablo is installed on the current environment under the path
+#   "$HOME/install/diablo" and setup anything necessary under the path
+#   "$HOME/deploy/diablo" to be ready to run.
+#
+#   The current environment can be configured to run as a diablo primary node
+#   or secondary node.
+#
+
+set -e
+
+script_name='deploy-diablo-worker'
+install_root="${HOME}/install/diablo"
+deploy_root="${HOME}/deploy/diablo"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 primary"
+    echo
+    echo "Usage: $0 secondary"
+
+    exit 1
+}
+
+prepare_deployment() {
+    if [ ! -d "${deploy_root}" ] ; then
+	mkdir -p "${deploy_root}"
+    fi
+}
+
+
+# Primary deployment  - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+deploy_primary() {
+    prepare_deployment
+
+    echo 'primary' > "${deploy_root}/role"
+}
+
+
+# Secondary deployment  - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+deploy_secondary() {
+    prepare_deployment
+
+    echo 'secondary' > "${deploy_root}/role"
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if [ $# -lt 1 ] ; then
+    fatal "missing node type ('primary' | 'secondary') operand"
+fi
+
+node_type="$1" ; shift
+
+case "${node_type}" in
+    'primary')
+	deploy_primary "$@"
+	;;
+    'secondary')
+	deploy_secondary "$@"
+	;;
+    *)
+	fatal "unknown node type: '${node_type}'"
+	;;
+esac

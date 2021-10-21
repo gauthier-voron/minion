@@ -1,0 +1,213 @@
+#!/usr/bin/perl -l
+
+use lib qw(. ./lib);
+use strict;
+use warnings;
+
+use Carp qw(confess);
+
+use Minion::Aws;
+use Minion::Aws::Fleet;
+use Minion::Aws::Image;
+use Minion::Run::Runner;
+use Minion::Shell;
+use Minion::StaticFleet;
+
+
+sub new_fleet
+{
+    my ($image, $secgroup, $fleet);
+
+    printf("Starting new fleet...\n");
+
+    $image = Minion::Aws::find_images(
+	'*ubuntu*20.04*amd64*server*',
+	REGIONS  => [ 'eu-central-1' ]
+	)->get()->{'eu-central-1'};
+
+    printf("Found image %s\n", $image->id());
+
+    $secgroup = Minion::Aws::find_secgroups(
+	'default',
+	REGIONS  => [ 'eu-central-1' ]
+	)->get()->{'eu-central-1'};
+
+    printf("Found secgroup %s\n", $secgroup);
+
+    $fleet = Minion::Aws::Fleet->launch(
+	$image->id(),
+	'c5.xlarge',
+	KEY      => 'gauthier',
+	PRICE    => 1.0,
+	REGION   => 'eu-central-1',
+	SECGROUP => $secgroup,
+	SIZE     => 6,
+	TIME     => 3600,
+	USER     => 'ubuntu',
+	)->get();
+
+    printf("Got new fleet '%s'\n", $fleet->id());
+
+    return $fleet;
+}
+
+sub get_fleet
+{
+    my ($id) = @_;
+    my ($fleet);
+
+    printf("Get existing fleet '%s'\n", $id);
+
+    $fleet = Minion::Aws::Fleet->new(
+	$id,
+	USER => 'ubuntu'
+	);
+
+    return $fleet;
+}
+
+sub main
+{
+    my $fleet_id  = undef;
+    my $installed = defined($fleet_id);
+    my ($fleet, $instance, $runner, $nodes, $primary, $secondary);
+
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    $SIG{INT} = sub { exit (0) };
+
+    if (defined($fleet_id)) {
+	$fleet = get_fleet($fleet_id);
+    } else {
+	$fleet = new_fleet();
+
+	printf("Joining fleet instances");
+
+	foreach $instance ($fleet->members()) {
+	    while($instance->execute(['true'],STDERR=>'/dev/null')->wait()!=0){
+		sleep(10);
+		printf(".");
+		$| = 1;
+	    }
+	}
+
+	printf("\n");
+    }
+
+    if (!defined($fleet)) {
+	printf("Error: undefined fleet\n");
+	exit (1);
+    }
+
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    $SIG{QUIT} = sub {
+	printf("Canceling fleet %s\n", $fleet->id());
+	$fleet->cancel()->get();
+	exit (0)
+    };
+
+    printf("Fleet instances:\n");
+    foreach $instance ($fleet->members()) {
+	printf("  - %s\n", $instance->public_ip());
+    }
+
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    $runner = Minion::Run::Runner->new(
+	ERR    => sub { printf(STDERR "ERR: %s\n", shift()) if (@_); },
+	LOCAL  => [ './script/local' ],
+	# LOG    => sub { printf("LOG: %s\n", shift()) if (@_); },
+	REMOTE => [ './script/remote' ]
+	);
+
+    if (!$installed) {
+	printf("Preparing installation...\n");
+	if ($runner->run($fleet, [ 'prepare-install' ])->wait() != 0) {
+	    return 1;
+	}
+
+	printf("Installing Algorand...\n");
+	if ($runner->run($fleet, [ 'install-algorand' ])->wait() != 0) {
+	    return 1;
+	}
+    }
+
+    printf("Installing Diablo...\n");
+    if ($runner->run(
+	    $fleet,
+	    [ 'install-diablo-dev', 'test-diablo' ]
+	)->wait() != 0) {
+
+	return 1;
+
+    }
+
+    $primary = Minion::StaticFleet->new([ ($fleet->members())[0] ]);
+    $secondary = Minion::StaticFleet->new([ ($fleet->members())[1] ]);
+    $nodes = Minion::StaticFleet->new([ ($fleet->members())[2..5] ]);
+
+    printf("Diablo Primary: %s\n", ($primary->members())[0]->public_ip());
+    printf("Diablo Secondary: %s\n", ($primary->members())[0]->public_ip());
+    printf("Algorand Nodes:\n");
+    foreach $instance ($nodes->members()) {
+	printf("  - %s\n", $instance->public_ip());
+    }
+
+    printf("Setting Algorand nodes\n");
+    if ($runner->run($nodes, [ 'behave-algorand', 'node' ])->wait() != 0) {
+	return 1;
+    }
+
+    printf("Setting Algorand clients\n");
+    if ($runner->run($secondary, [ 'behave-algorand', 'client' ])->wait() !=0){
+	return 1;
+    }
+
+    printf("Setting Diablo primary\n");
+    if ($runner->run($primary, [ 'behave-diablo', 'primary' ])->wait() != 0) {
+	return 1;
+    }
+
+    printf("Setting Diablo secondaries\n");
+    if ($runner->run($secondary, ['behave-diablo','secondary'])->wait() != 0) {
+	return 1;
+    }
+
+    printf("Deploy\n");
+    if ($runner->run($fleet, [ 'deploy' ])->wait() != 0) {
+	return 1;
+    }
+
+    printf("Start Algorand\n");
+    if ($runner->run($fleet, [ 'algorand', 'start' ])->wait() != 0) {
+	return 1;
+    }
+
+    printf("Start Diablo\n");
+    if ($runner->run($fleet, [ 'diablo', 'start' ])->wait() != 0) {
+	printf("Stop Algorand\n");
+	$runner->run($fleet, [ 'algorand', 'stop' ])->wait();
+	return 1;
+    }
+
+    printf("System is running...\n");
+    # <STDIN>;
+    sleep(300);
+
+    printf("Stop Diablo\n");
+    $runner->run($fleet, [ 'diablo', 'stop' ])->wait();
+
+    printf("Stop Algorand\n");
+    $runner->run($fleet, [ 'algorand', 'stop' ])->wait();
+
+    printf("Diablo Primary: %s\n", ($primary->members())[0]->public_ip());
+    printf("Diablo Secondary: %s\n", ($primary->members())[0]->public_ip());
+
+    printf("Fleet id: '%s'\n", $fleet->id());
+
+    return 0;
+}
+
+
+exit (main(@ARGV));

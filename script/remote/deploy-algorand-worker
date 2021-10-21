@@ -1,0 +1,286 @@
+#!/bin/bash
+#
+#   deploy-algorand-worker - deploy algorand on a worker node
+#
+#   Assume algorand is installed on the current environment under the path
+#   "$HOME/install/algorand" and setup anything necessary under the path
+#   "$HOME/deploy/algorand" to be ready to run.
+#
+#   The current environment can be configured to run as an algorand full node
+#   or client node, or both.
+#
+
+set -e
+
+script_name='deploy-algorand-worker'
+install_root="${HOME}/install/algorand"
+deploy_root="${HOME}/deploy/algorand"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 prepare (1)"
+    echo "       $0 generate <template> <nodefile> <clientfile> (2)"
+    echo
+    echo "Prepare the Algorand running directory in (1) or use the Algorand"
+    echo "toolchain to generate a network from a network <template> file, a"
+    echo "list of the full nodes <nodefile> and a list of the client nodes"
+    echo "<clientfile>."
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find algorand install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/go/bin:${PATH}"
+
+    if ! command -v 'goal' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find goal executable in '${install_root}'"
+    fi
+}
+
+
+# Prepare action  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    if [ ! -d "${deploy_root}" ] ; then
+	mkdir -p "${deploy_root}"
+    fi
+}
+
+
+# Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+# Kill all 'kmd' processes spawned by 'goal' in a previous task / function
+# invocation.
+#
+kill_kmd_processes() {
+    local netroot="$1" ; shift
+    local datadir pid pids
+
+    for datadir in "${netroot}/n"*/ "${netroot}/c"*/ ; do
+	pid=$(ps -eo pid,args | grep -v 'grep' | grep 'kmd' \
+		  | grep "${datadir}kmd-v" | awk '{print $1}')
+	pids+=(${pid})
+    done
+
+    kill -TERM ${pids[@]}
+}
+
+# Modify the full nodes and client nodes config file 'config.json' to set the
+# listening address to what is written in the <nodefile> and <clientfile>.
+#
+set_goal_network_address() {
+    local netroot="$1" ; shift
+    local nodefile="$1" ; shift
+    local clientfile="$1" ; shift
+    local nodenum clientnum i addr
+
+    nodenum=$(cat "${nodefile}" | wc -l)
+    clientnum=$(cat "${clientfile}" | wc -l)
+
+    for i in $(seq 1 ${nodenum}) ; do
+	addr=$(tail -n +${i} "${nodefile}" | head -n 1 \
+		   | sed -r 's/^.*:/0.0.0.0:/')
+	sed -ri 's/"NetAddress":.*/"NetAddress": "'"${addr}"'",/' \
+	    "${netroot}/n$(( i - 1 ))/config.json"
+    done
+
+    for i in $(seq 1 ${clientnum}) ; do
+	addr=$(tail -n +${i} "${clientfile}" | head -n 1 \
+		   | sed -r 's/^.*:/localhost:/')
+	sed -ri 's/\{/\{\n\t"EndpointAddress": "'"${addr}"'",/' \
+	    "${netroot}/c$(( i - 1 ))/config.json"
+    done
+}
+
+# Generate full and client nodes start script.
+# The 'algod' algorand daemon needs to know what full nodes to contact when
+# sending or propagating transactions (it is a manual replacement for the "dns"
+# of Algorand).
+# Unfortunately, I found no way to specify this in a configuration file and
+# need to specify it on command line.
+# For additional difficulty, full nodes need to connect to each others only
+# once, so we must ensure that node[0] connects to node[1] but node[1] does not
+# connect to node[0].
+# Each full node thus has a different list of full node tcp address to actively
+# connect to.
+# We store the command to invoke in "$netroot/$datadir/start".
+#
+generate_start_scripts() {
+    local netroot="$1" ; shift
+    local nodefile="$1" ; shift
+    local clientfile="$1" ; shift
+    local nodenum clientnum i addr peers sep
+
+    nodenum=$(cat "${nodefile}" | wc -l)
+    clientnum=$(cat "${clientfile}" | wc -l)
+    sep=''
+
+    for i in $(seq 1 ${nodenum}) ; do
+	(
+	    echo "#!/bin/bash"
+	    if [ "x${peers}" = 'x' ] ; then
+		echo 'exec goal node start --datadir "${0%/*}"'
+	    else
+		echo 'exec goal node start --datadir "${0%/*}" --peer' \
+		     "'${peers}'"
+	    fi
+	) > "${netroot}/n$(( i - 1 ))/start"
+	chmod 755 "${netroot}/n$(( i - 1 ))/start"
+	addr=$(tail -n +${i} "${nodefile}" | head -n 1)
+	peers="${peers}${sep}${addr}"
+	sep=';'
+    done
+
+    for i in $(seq 1 ${clientnum}) ; do
+	(
+	    echo "#!/bin/bash"
+	    echo 'exec goal node start --datadir "${0%/*}" --peer '"'${peers}'"
+	) > "${netroot}/c$(( i - 1 ))/start"
+	chmod 755 "${netroot}/c$(( i - 1 ))/start"
+    done
+}
+
+# Generate an Algorand token.
+# This is somehow necessary for Algorand to work properly but is only a
+# security/crypto concern.
+# Just put a trivial token.
+#
+generate_algod_tokens() {
+    local netroot="$1" ; shift
+    local clientfile="$1" ; shift
+    local clientnum i token
+
+    clientnum=$(cat "${clientfile}" | wc -l)
+
+    token='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+    for i in $(seq 1 ${clientnum}) ; do
+	clipath="${netroot}/c$(( i - 1 ))"
+	printf "%s" "${token}" > "${clipath}/algod.token"
+    done
+}
+
+# Generate the extra config containing the account addresses and mnemonics.
+# This is later concatenated to a Diablo blockchain configuration file and used
+# by Diablo nodes to generate and send transactions to/from the accounts which
+# have been generated.
+#
+generate_chainconfig() {
+    local netroot="$1" ; shift
+    local datadir account mnemonic pid
+
+    (
+	echo 'extra:'
+	echo '  - accounts:'
+
+	for datadir in "${netroot}/c"*/ ; do
+	    goal account list --datadir "${datadir}" | awk '{print $2}' \
+		| while read account ; do
+		echo "    - address:  ${account}"
+
+		mnemonic="$(goal account export --datadir "${datadir}" \
+                                                --address "${account}" \
+                            | tail -n1 | sed -r 's/^.*: "(.*)"$/\1/')"
+
+		echo "      mnemonic: ${mnemonic}"
+	    done
+
+	    pid=$(ps -eo pid,args | grep -v 'grep' | grep 'kmd' \
+		      | grep "${datadir}kmd-v" | awk '{print $1}')
+
+	    kill -TERM ${pid}
+	done
+    ) > "${deploy_root}/chain.yml"
+}
+
+# Generate an Algorand testnet specification in "$deploy_root/network" and a
+# Diablo blockchain configuration file in "$deploy_root/chain.yml".
+#
+# The testnet is a directory containing subdirectories "n0", "n1", etc... for
+# full nodes (ordered as in the specified <nodefile>) and "c0", "c1", etc...
+# for client nodes (ordered as in the specified <clientfile>).
+# These directories are to be used as a value for the '--datadir' option of the
+# Algorand 'goal' binary.
+#
+# The blockchain configuration is a file containing the 'extra' part of a full
+# Diablo blockchain configuration.
+# Concatenated with the main part, it is to be used as a value for the
+# '--chain-config' option of Diablo primary and secondary nodes.
+#
+generate() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing template operand"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing nodefile operand"
+    elif [ $# -lt 3 ] ; then
+	fatal "missing clientfile operand"
+    elif [ $# -gt 3 ] ; then
+	fatal "unexpected operand '$4'"
+    fi
+
+    local template="${deploy_root}/$1" ; shift
+    local nodefile="${deploy_root}/$1" ; shift
+    local clientfile="${deploy_root}/$1" ; shift
+    local logfile="${deploy_root}/generate.log"
+    local netroot="${deploy_root}/network"
+
+    setup_environment
+
+    if [ -e "${netroot}" ] ; then
+	rm -rf "${netroot}"
+    fi
+
+    if ! goal network create --rootdir "${netroot}" --network 'private' \
+	 --template "${template}" > "${logfile}" ; then
+	cat "${logfile}"
+	fatal "cannot generate network in '${netroot}'"
+    fi
+
+    kill_kmd_processes "${netroot}"
+    set_goal_network_address "${netroot}" "${nodefile}" "${clientfile}"
+    generate_start_scripts "${netroot}" "${nodefile}" "${clientfile}"
+    generate_algod_tokens "${netroot}" "${clientfile}"
+    generate_chainconfig "${netroot}"
+
+    rm "${netroot}/genesis.json"  # already in each node
+    rm "${netroot}/network.json"  # only used by goal network
+    rm "${netroot}/"*.rootkey     # already in associated node
+    rm "${netroot}/"*.partkey     # already in associated node
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'prepare')
+	prepare "$@"
+	;;
+    'generate')
+	generate "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac

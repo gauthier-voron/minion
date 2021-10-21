@@ -1,0 +1,109 @@
+#!/bin/bash
+#
+#   algorand - run algorand on a worker node
+#
+#   Assume algorand is installed on the current environment under the path
+#   "$HOME/install/algorand" and deployed under the path
+#   "$HOME/deploy/algorand".
+#
+#   Depending on the worker role defined during deployment, start or stop an
+#   algorand full or client node or both.
+#
+
+set -e
+
+script_name='algorand'
+install_root="${HOME}/install/algorand"
+deploy_root="${HOME}/deploy/algorand"
+
+node_root="${deploy_root}/node"
+client_root="${deploy_root}/client"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 start (1)"
+    echo "       $0 stop (2)"
+    echo
+    echo "Either start (1) or stop (2) the full and client nodes deployed on"
+    echo "this worker"
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find algorand install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/go/bin:${PATH}"
+
+    if ! command -v 'goal' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find goal executable in '${install_root}'"
+    fi
+}
+
+
+# Actions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+start() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    if [ -e "${node_root}" ] ; then
+	"${node_root}/start" > "${node_root}/out" 2> "${node_root}/err"
+    fi
+
+    if [ -e "${client_root}" ] ; then
+	"${client_root}/start" > "${client_root}/out" 2> "${client_root}/err"
+    fi
+}
+
+stop() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    if [ -e "${node_root}" ] ; then
+	goal node stop --datadir "${node_root}" > '/dev/null' || true
+    fi
+
+    if [ -e "${client_root}" ] ; then
+	goal node stop --datadir "${client_root}" > '/dev/null' || true
+    fi
+
+    killall 'algod' 2> '/dev/null' || true
+
+    rm -rf "${HOME}/.algorand"
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+setup_environment
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'start')
+	start "$@"
+	;;
+    'stop')
+	stop "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac

@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+#   install-diablo - install diablo
+#
+
+set -e
+
+diablo_url='https://github.com/NatoliChris/diablo-benchmark.git'
+diablo_checkout='master'
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+# Install common utilities as well as golang.
+#
+sudo -n apt-get install -yy 'git' 'make' 'golang'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Clone Diablo from the official repository and build it.
+#
+git clone "${diablo_url}" 'install/diablo'
+(
+    cd 'install/diablo'
+
+    git checkout "${diablo_checkout}"
+
+    # Avoid modification outside of this repository.
+    # This is important because some other installed software could use
+    # different versions of Go.
+    #
+    export GOPATH="${PWD}/go"
+
+    make diablo
+)
