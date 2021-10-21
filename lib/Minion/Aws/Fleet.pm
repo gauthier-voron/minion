@@ -359,9 +359,14 @@ sub instances
 	}
     }, MAPOUT => sub {
 	my ($reply) = @_;
+	my ($ret);
 
-	return [ map { $self->_make_instance_from_info($_, \%iopts) }
+	$ret = [ map { $self->_make_instance_from_info($_, \%iopts) }
 		 split("\n", $reply) ];
+
+	$self->{__PACKAGE__()}->{_cache}->{_members} = $ret;
+
+	return $ret;
     }, %fopts);
 
     return $ret;
@@ -504,8 +509,8 @@ sub members
     $size = $self->size();
 
     while (!defined($members) || (scalar(@$members) < $size)) {
-	$members = $self->instances()->get();
-	$self->{__PACKAGE__()}->{_cache}->{_members} = $members;
+	$self->instances()->get();
+	$members = $self->{__PACKAGE__()}->{_cache}->{_members};
     }
 
     return @$members;

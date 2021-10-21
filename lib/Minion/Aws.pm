@@ -68,7 +68,8 @@ sub find_images
 			'CreationDate:CreationDate,' .
 			'Description:Description,' .
 			'ImageId:ImageId,' .
-			'Name:Name' .
+		        'Name:Name,' .
+		        'ProductCodes:ProductCodes' .
 			'}',
 		    REGION => $region,
 		    %copts
@@ -99,6 +100,7 @@ sub find_images
 	    }
 
 	    $img = (sort { $b->{'CreationDate'} cmp $a->{'CreationDate'} }
+		    grep { !defined($_->{'ProductCodes'}) }
 		    grep { $_->{'Architecture'} eq 'x86_64' }
 		    @$result)[0];
 

@@ -749,7 +749,7 @@ sub request_spot_fleet
     if (defined($value = $opts{SIZE})) {
 	confess() if ($value !~ /^-?\d+$/);
 	return if ($value <= 0);
-	$config{'TargetCapacity'} = $value;
+	$config{'TargetCapacity'} = int($value);
 	delete($opts{SIZE});
     }
 

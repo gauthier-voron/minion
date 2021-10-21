@@ -690,7 +690,7 @@ TODO: {
 	is(scalar(@members), 3);
 	is($err, '');
 	is($log, '');
-	is_deeply(\@members, $insts);
+	ok(grep { $members[$_] == $insts->[$_] } (0 .. (scalar(@members)-1)));
 
 	$ret = $fleet->cancel();
 
