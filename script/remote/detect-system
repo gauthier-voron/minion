@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+#   detect-system - print the name of the current system
+#
+#   This script assumes a standard bash shell with the `command` and 'echo'
+#   builtins as well as common control flow (`if` / `elif` / `else`).
+#
+
+if ! command -v 'uname' > '/dev/null' ; then           # Cannot know the system
+    echo 'unknown'
+    exit 0
+fi
+
+if [ "x$(uname)" = 'xLinux' ] ; then                # The system is Linux based
+
+    if command -v 'apt-get' > '/dev/null' ; then   # The distro is Debian based
+
+	if ! command -v 'lsb_release' > '/dev/null' ; then
+	    echo 'linux/apt/unknown'
+	    exit 0
+	fi
+
+	id="$(lsb_release --id --short)"
+	version="$(lsb_release --release --short)"
+
+	if [ "x${id}" = 'xUbuntu' ] ; then         # The distribution is Ubuntu
+
+	    if [ "x${version}" != 'x' ] ; then           # The version is known
+		echo "linux/apt/ubuntu/${version}"
+		exit 0
+	    else                                       # The version is unknown
+		echo 'linux/apt/ubuntu/unknown'
+		exit 0
+	    fi
+
+	else                     # The distribution is unknown but Debian based
+
+	    echo 'linux/apt/unknown'
+	    exit 0
+
+	fi
+
+    elif command -v 'pacman' > '/dev/null' ; then    # The distro is Arch based
+
+	echo 'linux/pacman/archlinux'
+	exit 0
+
+    else                                          # The distribution is unknown
+
+	echo 'linux/unknown'
+	exit 0
+
+    fi
+
+else                                                    # The system is unknown
+    echo 'unknown'
+    exit 0
+fi
+
+
+# We should never reach this code
+exit 1
