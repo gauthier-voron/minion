@@ -102,26 +102,40 @@ sub execute
 sub send
 {
     my ($self, $sources, %opts) = @_;
-    my (%mopts, $opt, $value, @members, $member, $ret, $proc);
+    my (@members, $member, $value, $i);
+    my (@moptss, $mopts, $proc, $ret);
 
     confess() if (!defined($sources));
     confess() if (ref($sources) ne 'ARRAY');
     confess() if (grep { ref($_) ne '' } @$sources);
 
-    foreach $opt (qw(TARGET)) {
-	if (defined($value = $opts{$opt})) {
-	    $mopts{$opt} = $value;
-	    delete($opts{$opt});
+    @members = $self->members();
+
+    foreach $member (@members) {
+	push(@moptss, {});
+    }
+
+    if (defined($value = $opts{TARGETS})) {
+	if (ref($value) eq 'ARRAY') {
+	    confess() if (scalar(@$value) != scalar(@members));
+	    for ($i = 0; $i < scalar(@$value); $i++) {
+		$moptss[$i]->{TARGET} = $value->[$i];
+	    }
+	} else {
+	    for ($i = 0; $i < scalar(@members); $i++) {
+		$moptss[$i]->{TARGET} = $value;
+	    }
 	}
+	delete($opts{TARGETS});
     }
 
     confess(join(' ', keys(%opts))) if (%opts);
 
-    @members = $self->members();
     $ret = Minion::System::Pgroup->new([]);
 
     foreach $member (@members) {
-	$proc = $member->send($sources, %mopts);
+	$mopts = shift(@moptss);
+	$proc = $member->send($sources, %$mopts);
 	$ret->add($proc);
     }
 
