@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+#   install-algorand - install the Algorand blockchain from its repository
+#
+
+set -e
+
+algorand_url='https://github.com/algorand/go-algorand.git'
+algorand_checkout='master'
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+# Install common utilities as well as golang 1.14.
+# This specific version of golang is required by Algorand.
+# We install it along the standard golang version and add it to the PATH when
+# building Algorand.
+#
+sudo -n apt-get install -yy 'git' 'make' 'golang-1.14'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Clone Algorand from the official repository and build it.
+#
+git clone "${algorand_url}" 'install/algorand'
+(
+    cd 'install/algorand'
+
+    git checkout "${algorand_checkout}"
+
+    export PATH="/usr/lib/go-1.14/bin:${PATH}"
+
+    # For some obscure reason, Algorand does not build properly if the GOPATH
+    # is not $HOME (do these people make package with their ass?).
+    # Build with GOPATH="$HOME" then move "$HOME/go" in the repository.
+    #
+    # export GOPATH="${PWD}/go"
+
+    sudo --non-interactive --preserve-env='PATH' \
+	 ./scripts/configure_dev.sh
+
+    make install
+
+    # Fix the Golang/Algorand devs stupidity.
+    #
+    mv "${HOME}/go" './go'
+)
