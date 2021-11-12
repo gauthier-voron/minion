@@ -3,6 +3,8 @@ package behave_algorand;
 use strict;
 use warnings;
 
+use Getopt::Long qw(GetOptionsFromArray);
+
 # Implicitely defined variables:
 #
 #   - $_    : a Minion::Fleet containing all the workers running this code.
@@ -25,13 +27,24 @@ use warnings;
 #
 
 my $fleet = $_;
-my ($role) = @ARGV;
-my (@ips, $worker, $ip, $fh, $actors);
+my ($number, @err);
+my (@ips, $worker, $ip, $fh, $nodes);
 
-$actors = $ENV{MINION_SHARED} . '/algorand-actors';
+GetOptionsFromArray(
+    \@ARGV,
+    'n|number=i' => \$number
+    );
 
-if (!grep { $role eq $_ } qw(node client)) {
-    die ("unknown role '$role'");
+@err = @ARGV;
+
+if (@err) {
+    die ("unexpected argument '" . shift(@err) . "'");
+}
+
+$nodes = $ENV{MINION_SHARED} . '/algorand-nodes';
+
+if (!defined($number)) {
+    $number = 1;
 }
 
 foreach $worker ($fleet->members()) {
@@ -40,16 +53,16 @@ foreach $worker ($fleet->members()) {
     } elsif ($worker->can('host')) {
 	push(@ips, $worker->host());
     } else {
-	die ("cannot get ip of worker '$worker' for role '$role'");
+	die ("cannot get ip of worker '$worker'");
     }
 }
 
-if (!open($fh, '>>', $actors)) {
-    die ("cannot open actors file '$actors'");
+if (!open($fh, '>>', $nodes)) {
+    die ("cannot open actors file '$nodes'");
 }
 
 foreach $ip (@ips) {
-    printf($fh "%s:%s\n", $ip, $role);
+    printf($fh "%s:%d\n", $ip, $number);
 }
 
 close($fh);

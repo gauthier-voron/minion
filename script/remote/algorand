@@ -16,8 +16,8 @@ script_name='algorand'
 install_root="${HOME}/install/algorand"
 deploy_root="${HOME}/deploy/algorand"
 
-node_root="${deploy_root}/node"
-client_root="${deploy_root}/client"
+node_root="${deploy_root}/n"
+client_root="${deploy_root}/c"
 
 
 # Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -54,35 +54,55 @@ setup_environment() {
 # Actions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 start() {
+    local dir
+
     if [ $# -gt 0 ] ; then
 	fatal "unexpected operand '$1'"
     fi
 
-    if [ -e "${node_root}" ] ; then
-	"${node_root}/start" > "${node_root}/out" 2> "${node_root}/err"
-    fi
+    for dir in "${node_root}"* ; do
+	if [ -e "${dir}" ] ; then
+	    "${dir}/start" > "${dir}/out" 2> "${dir}/err"
+	fi
+    done
 
-    if [ -e "${client_root}" ] ; then
-	"${client_root}/start" > "${client_root}/out" 2> "${client_root}/err"
-    fi
+    for dir in "${client_root}"* ; do
+	if [ -e "${dir}" ] ; then
+	    "${dir}/start" > "${dir}/out" 2> "${dir}/err"
+	fi
+    done
 }
 
 stop() {
+    local dir
+
     if [ $# -gt 0 ] ; then
 	fatal "unexpected operand '$1'"
     fi
 
-    if [ -e "${node_root}" ] ; then
-	goal node stop --datadir "${node_root}" > '/dev/null' || true
-    fi
+    for dir in "${node_root}"* ; do
+	if [ -e "${dir}" ] ; then
+	    goal node stop --datadir "${dir}" > '/dev/null' || true
+	fi
+    done
 
-    if [ -e "${client_root}" ] ; then
-	goal node stop --datadir "${client_root}" > '/dev/null' || true
-    fi
+    for dir in "${client_root}"* ; do
+	if [ -e "${dir}" ] ; then
+	    goal node stop --datadir "${dir}" > '/dev/null' || true
+	fi
+    done
 
     killall 'algod' 2> '/dev/null' || true
 
     rm -rf "${HOME}/.algorand"
+}
+
+die() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    killall -KILL 'algod' 2> '/dev/null' || true
 }
 
 
@@ -97,6 +117,9 @@ fi
 action="$1" ; shift
 
 case "${action}" in
+    'die')
+	die "$@"
+	;;
     'start')
 	start "$@"
 	;;
