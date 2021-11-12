@@ -3,28 +3,55 @@ package deploy_algorand;
 use strict;
 use warnings;
 
-use File::Copy;
 
 use Minion::System::Pgroup;
 
 
-my $FLEET = $_;
-my %PARAMS = @_;
-my $RUNNER = $PARAMS{RUNNER};
-
-my $ACTORS_LIST_PATH = $ENV{MINION_SHARED} . '/diablo-actors';
-
-my $ALGORAND_CHAINCONFIG_PATH = $ENV{MINION_SHARED} . '/algorand-chain.yml';
-
-my $PRIMARYFILE_NAME = 'primary';
-my $PRIMARYFILE_PATH = $ENV{MINION_PRIVATE} . '/' . $PRIMARYFILE_NAME;
-my $PRIMARYFILE_TCP_PORT = 5000;
+my $PRIMARY_TCP_PORT = 5000;
 
 
-sub get_actors
+my $FLEET = $_;                        # Global parameter (setup by the Runner)
+my %PARAMS = @_;                      # Script parameters (setup by the Runner)
+my $RUNNER = $PARAMS{RUNNER};             # Runner itself (setup by the Runner)
+
+
+my $SHARED = $ENV{MINION_SHARED};
+
+my $DATA_DIR = $SHARED . '/diablo';
+my $ROLES_PATH = $DATA_DIR . '/behaviors.txt';
+my $WORKLOAD_PATH = $DATA_DIR . '/workload.yaml';
+
+
+my $PRIVATE = $ENV{MINION_PRIVATE};
+
+my $SPEC_WORKLOAD_PATH = $PRIVATE . '/workload.yaml';
+
+
+my $DEPLOY = 'deploy/diablo';
+my $CHAIN_LOC = $DEPLOY . '/chain.yaml';
+my $WORKLOAD_LOC = $DEPLOY . '/workload.yaml';
+my $KEYS_LOC = $DEPLOY . '/keys.json';
+
+
+my $ALGORAND_CHAINCONFIG_PATH = $SHARED . '/algorand-chain.yml';
+
+
+# Extract from the given $path the Quorum nodes.
+#
+# Return: { $ip => { 'worker'      => $worker
+#                  , 'primary'     => $primary
+#                  , 'secondaries' => $secondaries
+#                  }
+#         }
+#
+#   where $ip is an IPv4 address, $worker is a Minion::Worker object, $primary
+#   is '1' if the worker is primary and '0' if not, and $secondaries
+#   indicates the number of secondary instances to deploy on $worker.
+#
+sub get_nodes
 {
-    my ($path) = @_;;
-    my ($fh, $line, $ip, $role, %actors, $worker, $assigned);
+    my ($path) = @_;
+    my (%nodes, $node, $fh, $line, $ip, $role, $number, $worker, $assigned);
 
     if (!open($fh, '<', $path)) {
 	die ("cannot open '$path' : $!");
@@ -32,126 +59,195 @@ sub get_actors
 
     while (defined($line = <$fh>)) {
 	chomp($line);
-	($ip, $role) = split(':', $line);
+	($ip, $role, $number) = split(':', $line);
 
-	$assigned = undef;
+	$node = $nodes{$ip};
 
-	foreach $worker ($FLEET->members()) {
-	    if ($worker->can('public_ip') && ($worker->public_ip() eq $ip)) {
-		$assigned = $worker;
-		last;
-	    } elsif ($worker->can('host') && ($worker->host() eq $ip)) {
-		$assigned = $worker;
-		last;
+	if (!defined($node)) {
+	    $assigned = undef;
+
+	    foreach $worker ($FLEET->members()) {
+		if ($worker->can('public_ip')) {
+		    $assigned = $worker->public_ip();
+		} elsif ($worker->can('host')) {
+		    $assigned = $worker->host_ip();
+		}
+
+		if ($assigned eq $ip) {
+		    $assigned = $worker;
+		    last;
+		} else {
+		    $assigned = undef;
+		}
 	    }
-	}
 
-	if (!defined($assigned)) {
-	    die ("cannot find worker with ip '$ip' in deployment fleet");
-	}
-
-	if (defined($actors{$role}) && defined($actors{$role}->{$ip})) {
-	    if ($assigned ne $actors{$role}->{$ip}) {
-		die ("two workers have the same ip '$ip' on deployment fleet");
+	    if (!defined($assigned)) {
+		die ("cannot find worker with ip '$ip' in deployment fleet");
 	    }
+
+	    $node = {
+		'worker' => $assigned,
+		'primary' => 0,
+		'secondary' => 0
+	    };
+
+	    $nodes{$ip} = $node;
 	}
 
-	$actors{$role}->{$ip} = $assigned;
+	if ($role eq 'primary') {
+	    if ($number ne '1') {
+		die ("malformed roles file '$path': $line");
+	    }
+	    $node->{'primary'} += 1;
+	} elsif ($role eq 'secondary') {
+	    $node->{'secondaries'} += $number;
+	} else {
+	    die ("malformed roles file '$path': $line");
+	}
     }
 
     close($fh);
 
-    return \%actors;
-}
-
-sub build_primaryfile
-{
-    my ($path, $primary) = @_;
-    my ($fh);
-
-    if (!open($fh, '>', $path)) {
-	die ("cannot create diablo primaryfile '$path' : $!");
+    $number = 0;
+    foreach $ip (keys(%nodes)) {
+	$number += $nodes{$ip}->{'primary'};
     }
 
-    printf($fh "%s:%d\n", $primary, $PRIMARYFILE_TCP_PORT);
+    if ($number < 1) {
+	die ("no primary node defined in '$path'");
+    } elsif ($number > 1) {
+	die ("multiple primary nodes defined in '$path'");
+    }
 
-    close($fh);
+    return \%nodes;
 }
 
 
-sub deploy_diablo_algorand
+sub deploy_diablo_chain
 {
-    my ($primary, $secondaries) = @_;
-    my ($chain, $pproc, $sproc, $worker, @procs, $pgrp, $proc);
+    my ($nodes, $primary, $secondaries, $chain) = @_;
+    my ($worker, @procs, $proc, @stats);
 
-    $pproc = $RUNNER->run($primary, [ 'deploy-diablo-worker', 'primary' ]);
-    $sproc = $RUNNER->run($secondaries, ['deploy-diablo-worker', 'secondary']);
-
-    if ($pproc->wait() != 0) {
-	die ("cannot deploy diablo primary node");
-    }
-
-    if ($sproc->wait() != 0) {
-	die ("cannot deploy diablo secondary nodes");
-    }
-
-    $chain = $ENV{MINION_PRIVATE} . '/chain.yml';
-
-    if (!copy($ALGORAND_CHAINCONFIG_PATH, $chain)) {
-	die ("cannot send '$ALGORAND_CHAINCONFIG_PATH' to workers");
-    }
-
-    foreach $worker ($primary, @$secondaries) {
-	$proc = $worker->send(
-	    [ $chain, $PRIMARYFILE_PATH ],
-	    TARGET => 'deploy/diablo/'
-	    );
+    foreach $worker (map { $_->{'worker'} } values(%$nodes)) {
+	$proc = $worker->send([ $chain ], TARGET => $CHAIN_LOC);
 	push(@procs, $proc);
     }
 
-    $pgrp = Minion::System::Pgroup->new(\@procs);
+    @stats = Minion::System::Pgroup->new(\@procs)->waitall();
 
-    if (grep { $_->exitstatus() != 0 } $pgrp->waitall()) {
-	die ("cannot send config files to workers");
+    if (grep { $_->exitstatus() != 0 } @stats) {
+	die ("cannot send algorand chain configuration on workers");
     }
-
-    unlink($chain);
 
     return 1;
 }
 
+sub deploy_diablo_algorand
+{
+    return deploy_diablo_chain(@_, $ALGORAND_CHAINCONFIG_PATH);
+}
+
+
+
+
+sub specialize_workload
+{
+    my ($path, $template, $secondaries, $threads) = @_;
+    my ($rfh, $wfh, $line);
+
+    if (!open($rfh, '<', $template)) {
+	die ("cannot read workload file '$template' : $!");
+    }
+
+    if (!open($wfh, '>', $path)) {
+	die ("cannot write workload file '$path' : $!");
+    }
+
+    while (defined($line = <$rfh>)) {
+	chomp($line);
+
+	if ($line =~ /^secondaries: \d+\s*$/) {
+	    $line = 'secondaries: ' . $secondaries;
+	} elsif ($line =~ /^threads: \d+\s*$/) {
+	    $line = 'threads: ' . $threads;
+	}
+
+	printf($wfh "%s\n", $line);
+    }
+
+    close($rfh);
+    close($wfh);
+}
+
 sub deploy_diablo
 {
-    my ($actors, $primary, @secondaries);
+    my ($nodes, $ip, $primary, @secondaries, $proc, @procs, @stats);
 
-    if (!(-e $ACTORS_LIST_PATH)) {
+    if (!(-e $ROLES_PATH)) {
 	return 1;
     }
 
-    $actors = get_actors($ACTORS_LIST_PATH);
+    $nodes = get_nodes($ROLES_PATH);
 
-    if (defined($actors->{'primary'})) {
-	if (scalar(%{$actors->{'primary'}}) > 1) {
-	    die ("more than one diablo 'primary' defined");
+
+    foreach $ip (keys(%$nodes)) {
+	if ($nodes->{$ip}->{'primary'} > 0) {
+	    $proc = $RUNNER->run(
+		$nodes->{$ip}->{'worker'},
+		[ 'deploy-diablo-worker', 'primary', $PRIMARY_TCP_PORT ]
+		);
+	    if ($proc->wait() != 0) {
+		die ("cannot to deploy diablo primary on worker");
+	    }
+	    $primary = $ip;
+	    last;
 	}
-	$primary = (keys(%{$actors->{'primary'}}))[0];
-    } else {
-	die ("no diablo 'primary' defined");
     }
 
-    if (defined($actors->{'secondary'})) {
-	@secondaries = keys(%{$actors->{'secondary'}});
-    } else {
-	die ("no diablo 'secondary' defined");
+    foreach $ip (keys(%$nodes)) {
+	if ($nodes->{$ip}->{'secondaries'} > 0) {
+	    $proc = $RUNNER->run(
+		$nodes->{$ip}->{'worker'},
+		[ 'deploy-diablo-worker', 'secondary',
+		  $primary . ':' . $PRIMARY_TCP_PORT,
+		  $nodes->{$ip}->{'secondaries'} ]
+		);
+	    push(@procs, $proc);
+	    push(@secondaries, $ip);
+	}
     }
 
-    build_primaryfile($PRIMARYFILE_PATH, $primary);
+    @stats = Minion::System::Pgroup->new(\@procs)->waitall();
 
-    if (-e $ALGORAND_CHAINCONFIG_PATH) {
-	return deploy_diablo_algorand(
-	    $actors->{'primary'}->{$primary},
-	    [ map { $actors->{'secondary'}->{$_} } @secondaries ]);
+    if (grep { $_->exitstatus() != 0 } @stats) {
+	die ("cannot deploy diablo secondaries on workers");
     }
+
+
+    specialize_workload
+	($SPEC_WORKLOAD_PATH, $WORKLOAD_PATH, scalar(@secondaries), 1);
+
+    @procs = ();
+
+    foreach $ip (keys(%$nodes)) {
+	$proc = $nodes->{$ip}->{'worker'}->send(
+	    [ $SPEC_WORKLOAD_PATH ],
+	    TARGET => $WORKLOAD_LOC
+	    );
+	push(@procs, $proc);
+    }
+
+    @stats = Minion::System::Pgroup->new(\@procs)->waitall();
+
+    if (grep { $_->exitstatus() != 0 } @stats) {
+	die ("cannot send workload on workers");
+    }
+
+
+    if (-f $ALGORAND_CHAINCONFIG_PATH) {
+	return deploy_diablo_algorand($nodes, $primary, \@secondaries);
+    }
+
 
     return 1;
 }
