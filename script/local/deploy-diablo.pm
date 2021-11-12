@@ -3,6 +3,7 @@ package deploy_algorand;
 use strict;
 use warnings;
 
+# use File::Copy;
 
 use Minion::System::Pgroup;
 
@@ -35,6 +36,7 @@ my $KEYS_LOC = $DEPLOY . '/keys.json';
 
 my $ALGORAND_CHAINCONFIG_PATH = $SHARED . '/algorand-chain.yml';
 my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
+my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
 
 
 # Extract from the given $path the Quorum nodes.
@@ -153,6 +155,10 @@ sub deploy_diablo_quorum_ibft
     return deploy_diablo_chain(@_, $QUORUMIBFT_CHAIN_PATH);
 }
 
+sub deploy_diablo_quorum_raft
+{
+    return deploy_diablo_chain(@_, $QUORUMRAFT_CHAIN_PATH);
+}
 
 
 sub specialize_workload
@@ -255,6 +261,10 @@ sub deploy_diablo
 
     if (-f $QUORUMIBFT_CHAIN_PATH) {
 	return deploy_diablo_quorum_ibft($nodes, $primary, \@secondaries);
+    }
+
+    if (-f $QUORUMRAFT_CHAIN_PATH) {
+	return deploy_diablo_quorum_raft($nodes, $primary, \@secondaries);
     }
 
 
