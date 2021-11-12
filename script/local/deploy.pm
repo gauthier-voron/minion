@@ -26,6 +26,10 @@ if ($RUNNER->run($FLEET, [ 'deploy-quorum-ibft' ])->wait() != 0) {
     die ("failed to deploy quorum-ibft");
 }
 
+if ($RUNNER->run($FLEET, [ 'deploy-quorum-raft' ])->wait() != 0) {
+    die ("failed to deploy quorum-raft");
+}
+
 # Deploy diablo at the very end as it might need some configuration generated
 # by the deployment of other blockchains.
 #
