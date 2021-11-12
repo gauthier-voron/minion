@@ -14,7 +14,8 @@ fi
 
 # Install common utilities as well as golang if not yet installed.
 #
-if ! command -v 'go' > '/dev/null' ; then
+if ! command -v 'make' > '/dev/null' ||  ! command -v 'go' > '/dev/null' || \
+   ! command -v 'rsync' > '/dev/null'; then
     sudo -n apt-get install -yy 'make' 'golang' 'rsync'
 fi
 
