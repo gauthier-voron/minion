@@ -26,14 +26,17 @@ fatal() {
 
     echo "${script_name}: ${msg}"
     echo
-    echo "Usage: $0 primary"
+    echo "Usage: $0 primary <port>                           (1)"
+    echo "       $0 secondary <addr:port> [<number>]         (2)"
     echo
-    echo "Usage: $0 secondary"
 
     exit 1
 }
 
-prepare_deployment() {
+
+# Prepare deployment  - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare() {
     if [ ! -d "${deploy_root}" ] ; then
 	mkdir -p "${deploy_root}"
     fi
@@ -43,18 +46,46 @@ prepare_deployment() {
 # Primary deployment  - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 deploy_primary() {
-    prepare_deployment
+    if [ $# -lt 1 ] ; then
+	fatal "missing port operand"
+    elif [ $# -gt 1 ] ; then
+	fatal "unexpected operand '$2'"
+    fi
 
-    echo 'primary' > "${deploy_root}/role"
+    local port="$1" ; shift
+
+    prepare
+
+    mkdir "${deploy_root}/primary"
+    echo "${port}" > "${deploy_root}/primary/port"
 }
 
 
 # Secondary deployment  - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 deploy_secondary() {
-    prepare_deployment
+    if [ $# -lt 1 ] ; then
+	fatal "missing addr:port operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
+    fi
 
-    echo 'secondary' > "${deploy_root}/role"
+    local primary="$1" ; shift
+    local number="$1"
+    local i
+
+    if [ "x${number}" = 'x' ] ; then
+	number=1
+    else
+	shift
+    fi
+
+    prepare
+
+    for i in $(seq 0 $(( number - 1 ))) ; do
+	mkdir "${deploy_root}/secondary${i}"
+	echo "${primary}" > "${deploy_root}/secondary${i}/primary"
+    done
 }
 
 

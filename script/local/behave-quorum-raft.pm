@@ -1,23 +1,21 @@
-package behave_diablo;
+package behave_quorum_raft;
 
 
 use strict;
 use warnings;
 
-use File::Copy;
 use Getopt::Long qw(GetOptionsFromArray);
 
 
 my $FLEET = $_;                        # Global parameter (setup by the Runner)
 my $MINION_SHARED = $ENV{MINION_SHARED};        # Environment (setup by Runner)
 
-my $DATA_DIR = $MINION_SHARED . '/diablo';       # Where to store things across
+my $DATA_DIR = $MINION_SHARED . '/quorum-raft';  # Where to store things across
                                                  # Runner invocations
 
 my $ROLES_PATH = $DATA_DIR . '/behaviors.txt';           # Behaviors of workers
-my $WORKLOAD_PATH = $DATA_DIR . '/workload.yaml';          # Benchmark workload
 
-my ($role, $workload, $number, @err);                   # Arguments and options
+my ($number, @err);                                     # Arguments and options
 
 my ($worker, $ip, $text, $fh);
 
@@ -29,26 +27,14 @@ GetOptionsFromArray(
     'n|number=i' => \$number
     );
 
-($role, $workload, @err) = @ARGV;
+@err = @ARGV;
 
 if (@err) {
     die ("unexpected argument '" . shift(@err) . "'");
-} elsif (!grep { $role eq $_ } qw(primary secondary)) {
-    die ("unknown role '$role'");
-}
-
-if ($role eq 'primary') {
-    if (!defined($workload)) {
-	die ('missing workload operand');
-    }
-} elsif (defined($workload)) {
-    die ("unexpected operand '$workload'");
 }
 
 if (!defined($number)) {
     $number = 1;
-} elsif ($role eq 'primary') {
-    die ("invalid option '--number' used with 'primary' role");
 }
 
 
@@ -56,13 +42,6 @@ if (!defined($number)) {
 
 if (!(-d $DATA_DIR) && !mkdir($DATA_DIR)) {
     die ("cannot create data directory: $!");
-}
-
-
-# Copy workload file if supplied ----------------------------------------------
-
-if (defined($workload) && !copy($workload, $WORKLOAD_PATH)) {
-    die ("cannot copy workload file '$workload'");
 }
 
 
@@ -79,7 +58,7 @@ foreach $worker ($FLEET->members()) {
 	die ("cannot get ip of worker '$worker'");
     }
 
-    $text .= sprintf("%s:%s:%d\n", $ip, $role, $number);
+    $text .= sprintf("%s:%d\n", $ip, $number);
 }
 
 

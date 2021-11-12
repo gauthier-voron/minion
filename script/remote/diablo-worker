@@ -15,8 +15,6 @@ script_name='diablo-worker'
 install_root="${HOME}/install/diablo"
 deploy_root="${HOME}/deploy/diablo"
 
-primaryfile="${deploy_root}/primary"
-
 
 # Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -54,33 +52,46 @@ setup_environment() {
 # Primary node  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 start_primary() {
-    local pid port
+    local dir pid port
 
-    port="$(cat "${primaryfile}" | head -n1 | sed -r 's/^.*://' || \
-            fatal "cannot find primary file '${primaryfile}'")"
+    dir="${deploy_root}/primary"
+
+    if [ ! -d "${dir}" ] ; then
+	return 0
+    fi
+
+    port="$(cat "${dir}/port")"
+
+    if ! echo "${port}" | grep -Pq '^\d+$' ; then
+	fatal "cannot start diablo primary with port '${port}'"
+    fi
 
     diablo primary \
-        --config="${install_root}/scripts/sample/workloads/test-workload.yml"\
-        --chain-config="${deploy_root}/chain.yml" \
+        --config="${deploy_root}/workload.yaml"\
+        --chain-config="${deploy_root}/chain.yaml" \
 	--addr="0.0.0.0:${port}" \
 	--level='DEBUG' \
-	> "${deploy_root}/out" \
-	2> "${deploy_root}/err" &
+	> "${dir}/out" \
+	2> "${dir}/err" &
     pid=$!
 
-    echo ${pid} > "${deploy_root}/pid"
+    echo ${pid} > "${dir}/pid"
 
     sleep 2
 }
 
 stop_primary() {
-    local pid
+    local dir pid
 
-    if [ ! -e "${deploy_root}/pid" ] ; then
+    dir="${deploy_root}/primary"
+
+    if [ ! -d "${dir}" ] ; then
+	return 0
+    elif [ ! -e "${dir}/pid" ] ; then
 	return 0
     fi
 
-    pid="$(cat "${deploy_root}/pid")"
+    pid="$(cat "${dir}/pid")"
 
     if ! echo "${pid}" | grep -Pq '^\d+$' ; then
 	fatal "cannot kill diablo primary with pid '${pid}'"
@@ -88,58 +99,121 @@ stop_primary() {
 
     kill ${pid} 2> '/dev/null' || true
 
-    rm "${deploy_root}/pid"
+    rm "${dir}/pid"
+    if ! mv 'results' "${dir}/results" ; then
+	echo 'No results found'
+	mkdir "${dir}/results"
+    fi
 
     echo "--"
-    cat "${deploy_root}/out"
+    cat "${dir}/out"
     echo "--"
-    cat "${deploy_root}/err"
+    cat "${sir}/err"
+}
+
+wait_primary() {
+    local dir pid
+
+    dir="${deploy_root}/primary"
+
+    if [ ! -d "${dir}" ] ; then
+	return 0
+    elif [ ! -e "${dir}/pid" ] ; then
+	return 0
+    fi
+
+    pid="$(cat "${dir}/pid")"
+
+    if ! echo "${pid}" | grep -Pq '^\d+$' ; then
+	fatal "cannot wait diablo primary with pid '${pid}'"
+    fi
+
+    while ps aux | grep "${pid}" | grep 'diablo' > '/dev/null' ; do
+	sleep 10
+    done
+
+    rm "${dir}/pid"
+    if ! mv 'results' "${dir}/results" ; then
+	echo 'No results found'
+	mkdir "${dir}/results"
+    fi
+
+    echo "--"
+    cat "${dir}/out"
+    echo "--"
+    cat "${dir}/err"
 }
 
 
 # Secondary node  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 start_secondary() {
-    local pid addr
+    local dir pid addr
 
-    addr="$(cat "${primaryfile}" | head -n1 || \
-            fatal "cannot find primary file '${primaryfile}'")"
+    for dir in "${deploy_root}/secondary"* ; do
+	if [ ! -d "${dir}" ] ; then
+	    continue
+	fi
 
-    diablo secondary \
-	-m "${addr}" \
-        --config="${install_root}/scripts/sample/workloads/test-workload.yml"\
-	--chain-config="${deploy_root}/chain.yml" \
-	--level='DEBUG' \
-	--timeout=2 \
-	> "${deploy_root}/out" \
-	2> "${deploy_root}/err" &
-    pid=$!
+	addr="$(cat "${dir}/primary")"
 
-    echo ${pid} > "${deploy_root}/pid"
+	diablo secondary \
+	       -m "${addr}" \
+               --config="${deploy_root}/workload.yaml" \
+	       --chain-config="${deploy_root}/chain.yaml" \
+	       --level='DEBUG' \
+	       > "${dir}/out" \
+	       2> "${dir}/err" &
+	pid=$!
+
+	echo ${pid} > "${dir}/pid"
+    done
 }
 
 stop_secondary() {
-    local pid
+    local dir pid
 
-    if [ ! -e "${deploy_root}/pid" ] ; then
-	return 0
-    fi
+    for dir in "${deploy_root}/secondary"* ; do
+	if [ ! -d "${dir}" ] ; then
+	    continue
+	elif [ ! -e "${dir}/pid" ] ; then
+	    continue
+	fi
 
-    pid="$(cat "${deploy_root}/pid")"
+	pid="$(cat "${dir}/pid")"
 
-    if ! echo "${pid}" | grep -Pq '^\d+$' ; then
-	fatal "cannot kill diablo secondary with pid '${pid}'"
-    fi
+	if ! echo "${pid}" | grep -Pq '^\d+$' ; then
+	    fatal "cannot kill diablo secondary with pid '${pid}'"
+	fi
 
-    kill ${pid} 2> '/dev/null' || true
+	kill ${pid} 2> '/dev/null' || true
 
-    rm "${deploy_root}/pid"
+	rm "${dir}/pid"
+    done
+}
 
-    sleep 1
-    echo "--"
-    cat "${deploy_root}/out"
-    echo "--"
-    cat "${deploy_root}/err"
+wait_secondary() {
+    local dir pid
+
+    for dir in "${deploy_root}/secondary"* ; do
+	if [ ! -d "${dir}" ] ; then
+	    continue
+	elif [ ! -e "${sir}/pid" ] ; then
+	    continue
+	fi
+
+	pid="$(cat "${dir}/pid")"
+
+	if ! echo "${pid}" | grep -Pq '^\d+$' ; then
+	    fatal "cannot wait diablo secondary with pid '${pid}'"
+	fi
+
+	while ps aux | grep -q "${pid}" | grep 'diablo' > '/dev/null' ; do
+	    sleep 10
+	done
+
+	rm "${dir}/pid"
+    done
 }
 
 
@@ -156,20 +230,18 @@ fi
 role="$1" ; shift
 action="$1" ; shift
 
-node_role="$(cat "${deploy_root}/role" 2> '/dev/null' || true)"
-
-if [ "x${node_role}" = 'x' ] ; then
-    exit 0
-fi
-
 case "${role}" in
     'any')
-	true
+	role_primary=1
+	role_secondary=1
 	;;
-    'primary'|'secondary')
-	if [ "${role}" != "${node_role}" ] ; then
-	    exit 0
-	fi
+    'primary')
+	role_primary=1
+	role_secondary=0
+	;;
+    'secondary')
+	role_primary=0
+	role_secondary=1
 	;;
     *)
 	fatal "unknown role '${role}'"
@@ -178,30 +250,28 @@ esac
 
 case "${action}" in
     'start')
-	case "${node_role}" in
-	    'primary')
-		start_primary "$@"
-		;;
-	    'secondary')
-		start_secondary "$@"
-		;;
-	    *)
-		fatal "unknown role '${role}'"
-		;;
-	esac
+	if [ ${role_primary} -eq 1 ] ; then
+	    start_primary "$@"
+	fi
+	if [ ${role_secondary} -eq 1 ] ; then
+	    start_secondary "$@"
+	fi
 	;;
     'stop')
-	case "${node_role}" in
-	    'primary')
-		stop_primary "$@"
-		;;
-	    'secondary')
-		stop_secondary "$@"
-		;;
-	    *)
-		fatal "unknown role '${role}'"
-		;;
-	esac
+	if [ ${role_primary} -eq 1 ] ; then
+	    stop_primary "$@"
+	fi
+	if [ ${role_secondary} -eq 1 ] ; then
+	    stop_secondary "$@"
+	fi
+	;;
+    'wait')
+	if [ ${role_primary} -eq 1 ] ; then
+	    wait_primary "$@"
+	fi
+	if [ ${role_secondary} -eq 1 ] ; then
+	    wait_secondary "$@"
+	fi
 	;;
     *)
 	fatal "unknown action: '${action}'"

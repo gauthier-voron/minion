@@ -1,0 +1,231 @@
+#!/bin/bash
+
+set -e
+
+script_name='deploy-quorum-ibft-worker'
+install_root="${HOME}/install/quorum"
+deploy_root="${HOME}/deploy/quorum-ibft"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 prepare                                                (1)"
+    echo "       $0 generate <nodefile> <keyfile>                          (2)"
+    echo
+    echo "Prepare the Quorum-IBFT running directory in (1) or use the Quorum"
+    echo "toolchain to generate a network from a list of nodes <nodefile> and"
+    echo "list of the accounts to add with an initial balance in the "
+    echo "blockchain."
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find quorum install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/build/bin:${PATH}"
+    export PATH="${install_root}/istanbul-tools/build/bin:${PATH}"
+
+    if ! command -v 'geth' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find geth executable in '${install_root}'"
+    fi
+
+    if ! command -v 'istanbul' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find istanbul executable in '${install_root}'"
+    fi
+}
+
+
+# Prepare action  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    if [ ! -d "${deploy_root}" ] ; then
+	mkdir -p "${deploy_root}"
+    fi
+}
+
+
+# Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare_netroot() {
+    local netroot="$1" ; shift
+    local num i
+
+    if [ -e "${netroot}" ] ; then
+	rm -rf "${netroot}"
+    fi
+
+    num=$(cat "${nodefile}" | wc -l)
+
+    mkdir "${netroot}"
+    for i in $(seq 0 $(( num - 1 ))) ; do
+	mkdir "${netroot}/n${i}"
+    done
+}
+
+set_nodes_ip_port() {
+    local staticnodes="$1" ; shift
+    local nodefile="$1" ; shift
+    local tmp index lines node ip port rpcport
+
+    tmp="${staticnodes}.new"
+    index=1
+
+    while read -r line ; do
+	if ! echo "${line}" | grep -Pq '^\s*"enode' ; then
+	    echo "${line}"
+	    continue
+	fi
+
+	node="$(tail -n +${index} "${nodefile}" | head -n1)"
+	ip="$(echo "${node}" | cut -d':' -f1)"
+	port="$(echo "${node}" | cut -d':' -f2)"
+	echo "    ${line}" | sed -r 's/@.*\?/@'"${ip}:${port}"'?/'
+
+	index=$(( index + 1 ))
+    done < "${staticnodes}" > "${tmp}"
+    echo "]" >> "${tmp}"
+
+    mv "${tmp}" "${staticnodes}"
+}
+
+initialize_accounts() {
+    local genesis="$1" ; shift
+    local keyfile="$1" ; shift
+    local line account address private balance
+
+    balance="0x118427b3b4a05bc8a8a4de845986800000000000"
+
+    (
+	IFS=''
+	while read -r line ; do
+	    echo "${line}"
+	    if echo "${line}" | grep -Pq '^\s*"alloc"\s*:\s*{\s*$' ; then
+		while read account ; do
+		    address="$(echo "${account}" | cut -d':' -f1)"
+		    private="$(echo "${private}" | cut -d':' -f2)"
+		    printf "        \"%s\": {\n" "${address}"
+		    printf "            \"balance\": \"%s\"\n" "${balance}"
+		    printf "        },\n"
+		done < "${keyfile}"
+	    fi
+	done
+
+	printf "}"
+    ) < "${genesis}" > "${genesis}.new"
+
+    mv "${genesis}.new" "${genesis}"
+}
+
+initialize_nodes() {
+    local netroot="$1" ; shift
+    local staticnodes="$1" ; shift
+    local genesis="$1" ; shift
+    local nodefile="$1" ; shift
+    local i num node port rpcport
+
+    num=$(cat "${nodefile}" | wc -l)
+
+    for i in $(seq 0 $(( num - 1 ))) ; do
+	node="$(tail -n +$(( i + 1 )) "${nodefile}" | head -n1)"
+	port="$(echo "${node}" | cut -d':' -f2)"
+	rpcport="$(echo "${node}" | cut -d':' -f3)"
+
+	cp "${staticnodes}" "${netroot}/n${i}/static-nodes.json"
+
+	cp "${netroot}/${i}/nodekey" "${netroot}/n${i}/nodekey"
+	chmod 644 "${netroot}/n${i}/nodekey"
+
+	if ! geth --datadir "${netroot}/n${i}" init "${genesis}" \
+	     > "${netroot}/n${i}/geth.log" 2>&1 ; then
+	    cat "${netroot}/n${i}/geth.log" >&2
+	    rm "${netroot}/n${i}/geth.log"
+	    return 1
+	fi
+
+	rm "${netroot}/n${i}/geth.log"
+
+	rm -rf "${netroot}/${i}"
+
+	echo "${port}" > "${netroot}/n${i}/port"
+	echo "${rpcport}" > "${netroot}/n${i}/rpcport"
+    done
+}
+
+generate() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing nodefile operand"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing keyfile operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
+    fi
+
+    local nodefile="$1" ; shift
+    local keyfile="$1" ; shift
+    local netroot="${deploy_root}/network"
+    local num
+
+    setup_environment
+
+    prepare_netroot "${netroot}"
+
+    num=$(cat "${nodefile}" | wc -l)
+
+    (
+	cd "${netroot}"
+
+	if ! istanbul setup --num ${num} --nodes --quorum --save --verbose \
+	     > 'istanbul.log' 2>&1 ; then
+	    cat 'istanbul.log' >&2
+	    rm 'istanbul.log'
+	    return 1
+	fi
+
+	rm 'istanbul.log'
+    )
+
+    set_nodes_ip_port "${netroot}/static-nodes.json" "${nodefile}"
+
+    initialize_accounts "${netroot}/genesis.json" "${keyfile}"
+
+    initialize_nodes "${netroot}" "${netroot}/static-nodes.json" \
+		     "${netroot}/genesis.json" "${nodefile}"
+
+    rm "${netroot}/static-nodes.json"
+    rm "${netroot}/genesis.json"
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'prepare')
+	prepare "$@"
+	;;
+    'generate')
+	generate "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac

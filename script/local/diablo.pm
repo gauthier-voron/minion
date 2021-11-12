@@ -21,7 +21,7 @@ if (!defined($action)) {
 # Start the Diablo primary node first and when confirmation that it is running,
 # then start the diablo secondaries.
 #
-sub start
+sub start_nodes
 {
     my ($proc);
 
@@ -41,7 +41,7 @@ sub start
 
 # Stop the Diablo primary and secondary nodes.
 #
-sub stop
+sub stop_nodes
 {
     my ($proc);
 
@@ -53,11 +53,27 @@ sub stop
     return 1;
 }
 
+# Wait for the Diablo primary and secondary nodes.
+#
+sub wait_nodes
+{
+    my ($proc);
+
+    $proc = $RUNNER->run($FLEET, [ 'diablo-worker', 'any', 'wait' ]);
+    if ($proc->wait() != 0) {
+	die ("cannot wait diablo nodes");
+    }
+
+    return 1;
+}
+
 
 if ($action eq 'start') {
-    start();
+    start_nodes();
 } elsif ($action eq 'stop') {
-    stop();
+    stop_nodes();
+} elsif ($action eq 'wait') {
+    wait_nodes();
 } else {
     die ("unknown action '$action'");
 }

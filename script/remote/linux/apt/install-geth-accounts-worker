@@ -1,0 +1,133 @@
+#!/bin/bash
+#
+#   install-geth-accounts-worker - install the tools necessary to generate
+#                                  accounts with geth then generate some
+#                                  accounts with an initial balance.
+#
+
+set -e
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+
+number="$1"
+
+if [ "x${number}" = 'x' ] ; then
+    number=2
+fi
+
+
+# Install a tool to add the ethereum PPA repository
+#
+sudo -n apt-get install -yy 'software-properties-common'
+
+# Add the ethereum PPA repository
+#
+sudo add-apt-repository -yy 'ppa:ethereum/ethereum'
+
+# Install geth and python (for private key extraction)
+#
+sudo -n apt-get install -yy 'geth' 'python3' 'python3-pip'
+pip3 install 'web3'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Remove already installed accounts if already there.
+#
+if [ -e 'install/geth-accounts' ] ; then
+    rm -rf 'install/geth-accounts'
+fi
+
+# Create an accounts directory
+#
+if [ ! -e 'install/geth-accounts' ] ; then
+    mkdir 'install/geth-accounts'
+fi
+
+
+# Generate the extraction script.
+# Geth stores private keys encrypted with a password.
+# We want to use the private key unencrypted in Diablo so we need to extract
+# the key and store it in hexadecimal format.
+#
+cat > 'install/geth-accounts/extract.py' <<EOF
+#!/usr/bin/env python3
+
+import binascii
+import sys
+from web3.auto import w3
+
+keypath = sys.argv[1]
+password = sys.argv[2]
+
+with open(keypath) as keyfile:
+    encrypted_key = keyfile.read()
+    private_key   = w3.eth.account.decrypt(encrypted_key, password)
+    formatted_key = binascii.b2a_hex(private_key).decode('ascii')
+    print (formatted_key)
+EOF
+chmod 755 'install/geth-accounts/extract.py'
+
+
+# Generate accounts in the account directory.
+# Also exteact the key to a simple hex unencrypted format.
+#
+batch=$(cat '/proc/cpuinfo' | grep '^processor' | wc -l)
+total=0
+while [ ${total} -lt ${number} ] ; do
+    len=$(( number - total ))
+    if [ ${batch} -lt ${len} ] ; then
+	len=${batch}
+    fi
+    upto=$(( total + len - 1 ))
+
+    for i in $(seq ${total} ${upto}) ; do
+	(
+	    mkdir "install/geth-accounts/${i}"
+
+	    if ! printf "%d\n%d\n" ${i} ${i} | \
+		    geth --datadir install/geth-accounts/"${i}" account new \
+			 > '/dev/null' 2> "install/geth-accounts/${i}.log"
+	    then
+		cat "install/geth-accounts/${i}.log" >&2
+	    fi
+
+	    rm "install/geth-accounts/${i}.log"
+
+	    keypath="$(ls -1 "install/geth-accounts/${i}/keystore/"|head -n1)"
+	    keypath="install/geth-accounts/${i}/keystore/${keypath}"
+	    address="${keypath##*--}"
+
+	    echo "${address}" > "install/geth-accounts/${i}/address"
+
+	    ./install/geth-accounts/extract.py "${keypath}" ${i} \
+		> "install/geth-accounts/${i}/private"
+
+	    rm -rf "install/geth-accounts/${i}/keystore"
+	) &
+    done
+
+    wait
+
+    total=$(( upto + 1 ))
+
+    echo "Account generation: ${total} / ${number}"
+done
+
+# Gather every address and private key in a single text file
+#
+(
+    for i in $(seq 0 $(( number - 1 ))) ; do
+	address="$(cat "install/geth-accounts/${i}/address")"
+	private="$(cat "install/geth-accounts/${i}/private")"
+	printf "%s:%s\n" "${address}" "${private}"
+	rm -rf "install/geth-accounts/${i}"
+    done
+) > 'install/geth-accounts/accounts.txt'

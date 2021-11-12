@@ -1,0 +1,61 @@
+#!/bin/bash
+#
+#   install-quorum - install the Quorum blockchain from its repository
+#
+
+set -e
+
+quorum_url='https://github.com/Consensys/quorum.git'
+quorum_checkout='master'
+
+istanbul_url='https://github.com/ConsenSys/istanbul-tools.git'
+istanbul_checkout='master'
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+# Install common utilities as well as golang.
+#
+sudo -n apt-get install -yy 'git' 'make' 'golang'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Clone Quorum from the official repository and build it.
+#
+git clone "${quorum_url}" 'install/quorum'
+(
+    cd 'install/quorum'
+
+    git checkout "${quorum_checkout}"
+
+    # Avoid modification outside of this repository.
+    # This is important because some other installed software could use
+    # different versions of Go.
+    #
+    export GOPATH="${PWD}/go"
+
+    make all
+)
+
+# Clone Quorum Istanbul tools from the official repository and build them.
+#
+git clone "${istanbul_url}" 'install/quorum/istanbul-tools'
+(
+    cd 'install/quorum/istanbul-tools'
+
+    git checkout "${istanbul_checkout}"
+
+    # Avoid modification outside of this repository.
+    # This is important because some other installed software could use
+    # different versions of Go.
+    #
+    export GOPATH="${PWD}/../go"
+
+    make
+)
