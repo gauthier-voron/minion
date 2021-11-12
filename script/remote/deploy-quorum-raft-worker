@@ -1,0 +1,209 @@
+#!/bin/bash
+
+set -e
+
+script_name='deploy-quorum-raft-worker'
+install_root="${HOME}/install/quorum"
+deploy_root="${HOME}/deploy/quorum-raft"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 prepare                                                (1)"
+    echo "       $0 generate <nodefile> <keyfile>                          (2)"
+    echo
+    echo "Prepare the Quorum-Raft running directory in (1) or use the Quorum"
+    echo "toolchain to generate a network from a list of nodes <nodefile> and"
+    echo "list of the accounts to add with an initial balance in the "
+    echo "blockchain."
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find quorum install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/build/bin:${PATH}"
+
+    if ! command -v 'geth' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find geth executable in '${install_root}'"
+    fi
+
+    if ! command -v 'bootnode' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find bootnode executable in '${install_root}'"
+    fi
+}
+
+
+# Prepare action  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    if [ ! -d "${deploy_root}" ] ; then
+	mkdir -p "${deploy_root}"
+    fi
+}
+
+
+# Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+generate_genesis() {
+    local genesis="$1" ; shift
+    local keyfile="$1" ; shift
+    local account address balance sep
+
+    balance="0x118427b3b4a05bc8a8a4de845986800000000000"
+
+    (
+	cat <<'EOF'
+{
+    "alloc": {
+EOF
+
+	sep=''
+	while read account ; do
+	    address="$(echo "${account}" | cut -d':' -f1)"
+	    printf "${sep}"
+	    printf "        \"%s\": {\n" "${address}"
+	    printf "            \"balance\": \"%s\"\n" "${balance}"
+	    printf "        }"
+	    sep=",\n"
+	done < "${keyfile}"
+	printf "\n"
+
+	cat <<'EOF'
+    },
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "config": {
+        "homesteadBlock": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "chainId": 10,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip150Hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "eip158Block": 0,
+        "maxCodeSizeConfig": [
+            {
+                "block": 0,
+                "size": 35
+            }
+        ],
+        "isQuorum": true
+    },
+    "difficulty": "0x0",
+    "extraData": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "gasLimit": "0xE0000000",
+    "mixhash": "0x00000000000000000000000000000000000000647572616c65787365646c6578",
+    "nonce": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "timestamp": "0x00"
+}
+EOF
+    ) > "${genesis}"
+}
+
+generate_nodes() {
+    local netroot="$1" ; shift
+    local nodefile="$1" ; shift
+    local keyfile="$1" ; shift
+    local genesis="$1" ; shift
+    local line addr port raftport wsport index dir enode sep
+
+    mkdir "${netroot}"
+
+    (
+	printf "[\n"
+
+	sep=''
+	index=0
+
+	while read line ; do
+	    addr="$(echo "${line}" | cut -d':' -f1)"
+	    port="$(echo "${line}" | cut -d':' -f2)"
+	    raftport="$(echo "${line}" | cut -d':' -f3)"
+	    wsport="$(echo "${line}" | cut -d':' -f4)"
+	    
+	    dir="${netroot}/n${index}"
+
+	    mkdir "${dir}"
+	    geth --datadir "${dir}" init "${genesis}"
+	    echo "${port}" > "${dir}/port"
+	    echo "${raftport}" > "${dir}/raftport"
+	    echo "${wsport}" > "${dir}/wsport"
+
+	    bootnode --genkey="${dir}/nodekey"
+	    enode="$(bootnode --nodekey="${dir}/nodekey" --writeaddress)"
+
+	    printf "${sep}    \"enode://%s@%s:%d?discport=0&raftport=%d\"" \
+		   "${enode}" "${addr}" "${port}" "${raftport}"
+
+	    sep=",\n"
+	    index=$(( index + 1 ))
+	done < "${nodefile}"
+
+	printf "\n]\n"
+    ) > "${netroot}/static-nodes.json"
+
+    for dir in "${netroot}/n"* ; do
+	cp "${netroot}/static-nodes.json" "${dir}"
+    done
+
+    rm "${netroot}/static-nodes.json"
+}
+
+generate() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing nodefile operand"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing keyfile operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
+    fi
+
+    local nodefile="$1" ; shift
+    local keyfile="$1" ; shift
+    local netroot="${deploy_root}/network"
+ 
+    setup_environment
+
+    generate_genesis "${deploy_root}/genesis.json" "${keyfile}"
+
+    generate_nodes "${netroot}" "${nodefile}" "${keyfile}" \
+		   "${deploy_root}/genesis.json"
+
+    rm "${deploy_root}/genesis.json"
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'prepare')
+	prepare "$@"
+	;;
+    'generate')
+	generate "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac
