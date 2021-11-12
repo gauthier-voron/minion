@@ -3,6 +3,8 @@ package deploy_algorand;
 use strict;
 use warnings;
 
+use List::Util qw(sum);
+
 use Minion::StaticFleet;
 use Minion::System::Pgroup;
 
@@ -11,31 +13,42 @@ my $FLEET = $_;
 my %PARAMS = @_;
 my $RUNNER = $PARAMS{RUNNER};
 
-my $ACTORS_LIST_PATH = $ENV{MINION_SHARED} . '/algorand-actors';
+my $NODE_LIST_PATH = $ENV{MINION_SHARED} . '/algorand-nodes';
 
 my $NETWORK_TEMPLATE_NAME = 'network.json';
 my $NETWORK_TEMPLATE_PATH = $ENV{MINION_PRIVATE} . '/' .$NETWORK_TEMPLATE_NAME;
 
 my $NODEFILE_NAME = 'nodes';
 my $NODEFILE_PATH = $ENV{MINION_PRIVATE} . '/' . $NODEFILE_NAME;
-my $NODEFILE_TCP_PORT = 7000;
 
-my $CLIENTFILE_NAME = 'clients';
-my $CLIENTFILE_PATH = $ENV{MINION_PRIVATE} . '/' . $CLIENTFILE_NAME;
-my $CLIENTFILE_TCP_PORT = 9000;
+my $PEER_TCP_PORT   = 7000;
+my $CLIENT_TCP_PORT = 9000;
 
 my $NETWORK_NAME = 'network';
 my $NETWORK_PATH = $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME;
+
+my $CHAINEXTRA_NAME = 'chain.yml';
+my $CHAINEXTRA_PATH = $ENV{MINION_PRIVATE} . '/' . $CHAINEXTRA_NAME;
 
 my $CHAINCONFIG_NAME = 'algorand-chain.yml';
 my $CHAINCONFIG_PATH = $ENV{MINION_SHARED} . '/' . $CHAINCONFIG_NAME;
 my $CHAINCONFIG_TCP_PORT = 3000;
 
 
-sub get_actors
+# Extract from the given $path the Algorand nodes.
+#
+# Return: { $ip => { 'worker' => $worker
+#                  , 'number' => $number
+#                  }
+#         }
+#
+#   where $ip is an IPv4 address, $worker is a Minion::Worker object and
+#   $number indicates the number of instances to deploy on $worker.
+#
+sub get_nodes
 {
-    my ($path) = @_;;
-    my ($fh, $line, $ip, $role, %actors, $worker, $assigned);
+    my ($path) = @_;
+    my (%nodes, $node, $fh, $line, $ip, $number, $worker, $assigned);
 
     if (!open($fh, '<', $path)) {
 	die ("cannot open '$path' : $!");
@@ -43,7 +56,14 @@ sub get_actors
 
     while (defined($line = <$fh>)) {
 	chomp($line);
-	($ip, $role) = split(':', $line);
+	($ip, $number) = split(':', $line);
+
+	$node = $nodes{$ip};
+
+	if (defined($node)) {
+	    $node->{'number'} += $number;
+	    next;
+	}
 
 	$assigned = undef;
 
@@ -61,24 +81,73 @@ sub get_actors
 	    die ("cannot find worker with ip '$ip' in deployment fleet");
 	}
 
-	if (defined($actors{$role}) && defined($actors{$role}->{$ip})) {
-	    if ($assigned ne $actors{$role}->{$ip}) {
-		die ("two workers have the same ip '$ip' on deployment fleet");
-	    }
-	}
-
-	$actors{$role}->{$ip} = $assigned;
+	$nodes{$ip} = {
+	    'worker' => $assigned,
+	    'number' => $number
+	};
     }
 
     close($fh);
 
-    return \%actors;
+    return \%nodes;
+}
+
+# Return the sorted IPs of Algorand full or client nodes from the actors as
+# returned by `get_actors()` and a role.
+# If an actor has an instance number greater than 1 then its IP is repeated as
+# many times.
+#
+# Return: [ $ip , ... ]
+#
+sub get_actors_ip_instances
+{
+    my ($actors, $role) = @_;
+    my (@ips, $ip, $actor, $number, $i);
+
+    while (($ip, $actor) = each(%{$actors->{$role}})) {
+	$number = $actor->[1];
+	for ($i = 0; $i < $number; $i++) {
+	    push(@ips, $ip);
+	}
+    }
+
+    return [ sort { $a cmp $b } @ips ];
+}
+
+# Return the workers of Algorand full or client nodes from the actors as
+# returned by `get_actors()` and a role.
+# If an actor has an instance number greater than 1 then the corresponding
+# worker is repeated as many times.
+# The workers appear sorted by their IP.
+#
+# Return: [ $worker , ... ]
+#
+sub get_actors_worker_instances
+{
+    my ($actors, $role) = @_;
+    my (@workers, $ip, $actor, $worker, $number, $i);
+
+    foreach $ip (sort { $a cmp $b } keys(%{$actors->{$role}})) {
+	$actor = $actors->{$role}->{$ip};
+	$worker = $actor->[0];
+	$number = $actor->[1];
+
+	for ($i = 0; $i < $number; $i++) {
+	    push(@workers, $worker);
+	}
+    }
+
+    return \@workers;
 }
 
 sub build_network_template
 {
-    my ($path, $nodenum, $walletnum) = @_;
-    my ($fh, $share, $rem, $stake, $online, $name, $sep, $i);
+    my ($path, $nodes) = @_;
+    my ($nodenum, $walletnum);
+    my ($fh, $share, $rem, $stake, $name, $sep, $i);
+
+    $nodenum = sum(map { $_->{'number'} } values(%$nodes));
+    $walletnum = $nodenum;
 
     $share = sprintf("%.2f", 100.0 / $walletnum);
     $rem = 100.0 - ($share * $walletnum);
@@ -103,17 +172,11 @@ EOF
 	    $stake = $share;
 	}
 
-	if ($i < $nodenum) {
-	    $online = 'true';
-	} else {
-	    $online = 'false';
-	}
-
 	printf($fh "%s%s", $sep, <<"EOF");
 	    {
 		"Name": "wallet_$i",
 		"Stake": $stake,
-		"Online": $online
+		"Online": true
 	    }
 EOF
 	$sep = "\t    ,\n";
@@ -129,18 +192,12 @@ EOF
     $sep = '';
 
     for ($i = 0; $i < $walletnum; $i++) {
-	if ($i < $nodenum) {
-	    $name = "n" . $i;
-	    $online = 'true';
-	} else {
-	    $name = "c" . ($i - $nodenum);
-	    $online = 'false';
-	}
+	$name = "n" . $i;
 
 	printf($fh "%s%s", $sep, <<"EOF");
 	{
 	    "Name": "$name",
-	    "IsRelay": $online,
+	    "IsRelay": true,
 	    "Wallets": [
 		{
 		    "Name": "wallet_$i",
@@ -164,39 +221,56 @@ EOF
 sub build_nodefile
 {
     my ($path, $nodes) = @_;
-    my ($fh, $node);
+    my ($fh, $ip, $i);
 
     if (!open($fh, '>', $path)) {
 	die ("cannot create algorand nodefile '$path' : $!");
     }
 
-    foreach $node (@$nodes) {
-	printf($fh "%s:%d\n", $node, $NODEFILE_TCP_PORT);
+    foreach $ip (keys(%$nodes)) {
+	for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
+	    printf($fh "%s:%d:%d\n", $ip, $PEER_TCP_PORT + $i,
+		   $CLIENT_TCP_PORT + $i);
+	}
     }
 
     close($fh);
 }
 
-sub build_clientfile
+sub dispatch
 {
-    my ($path, $clients) = @_;
-    my ($fh, $client);
+    my ($nodes, $network) = @_;
+    my ($ip, $i, $done, @paths, @procs, $proc, @statuses);
 
-    if (!open($fh, '>', $path)) {
-	die ("cannot create algorand clientfile '$path' : $!");
+    $done = 0;
+
+    foreach $ip (keys(%$nodes)) {
+	@paths = ();
+
+	for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
+	    push(@paths, $NETWORK_PATH . '/n' . ($done + scalar(@paths)));
+	}
+
+	$proc = $nodes->{$ip}->{'worker'}->send(
+	    [ @paths ],
+	    TARGET => 'deploy/algorand/'
+	    );
+	push(@procs, $proc);
+
+	$done += scalar(@paths);
     }
 
-    foreach $client (@$clients) {
-	printf($fh "%s:%d\n", $client, $CLIENTFILE_TCP_PORT);
-    }
+    @statuses = Minion::System::Pgroup->new(\@procs)->waitall();
 
-    close($fh);
+    if (grep { $_->exitstatus() != 0 } @statuses) {
+	die ("cannot dispatch algorand network to workers");
+    }
 }
 
 sub build_chainconfig
 {
-    my ($path, $clients, $extra) = @_;
-    my ($fh, $client, $eh, $line);
+    my ($path, $nodes, $extra) = @_;
+    my ($fh, $ip, $i, $eh, $line);
 
     if (!open($fh, '>', $path)) {
 	die ("cannot create algorand chain config '$path' : $!");
@@ -205,8 +279,10 @@ sub build_chainconfig
     printf($fh "name: algorand\n");
     printf($fh "nodes:\n");
 
-    foreach $client (@$clients) {
-	printf($fh "  - localhost:%d\n", $CLIENTFILE_TCP_PORT);
+    foreach $ip (keys(%$nodes)) {
+	for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
+	    printf($fh "  - %s:%d\n", $ip, $CLIENT_TCP_PORT + $i);
+	}
     }
 
     if (open($eh, '<', $extra)) {
@@ -221,40 +297,22 @@ sub build_chainconfig
 
 sub deploy_algorand
 {
-    my ($actors, @nodes, @clients, $genworker, $ret);
+    my ($nodes, $genworker, $ret);
     my ($i, $proc, @procs, @statuses);
 
-    if (!(-e $ACTORS_LIST_PATH)) {
+    if (!(-e $NODE_LIST_PATH)) {
 	return 1;
     }
 
-    $actors = get_actors($ACTORS_LIST_PATH);
-
-    if (defined($actors->{'node'})) {
-	@nodes = keys(%{$actors->{'node'}});
-    } else {
-	die ("no algorand 'node' defined");
-    }
-
-    if (defined($actors->{'client'})) {
-	@clients = keys(%{$actors->{'client'}});
-    } else {
-	die ("no algorand 'client' defined");
-    }
+    $nodes = get_nodes($NODE_LIST_PATH);
 
     # Build the global information files necessary to generate the Algorand
     # testnet.
     #
 
-    build_network_template(
-	$NETWORK_TEMPLATE_PATH,
-	scalar(@nodes),
-	scalar(@nodes) + scalar(@clients)
-	);
+    build_network_template($NETWORK_TEMPLATE_PATH, $nodes);
 
-    build_nodefile($NODEFILE_PATH, \@nodes);
-
-    build_clientfile($CLIENTFILE_PATH, \@clients);
+    build_nodefile($NODEFILE_PATH, $nodes);
 
     # The testnet generation involves Algorand binaries. It is thus necessary
     # to send the information files to a worker with the installed binaries for
@@ -272,7 +330,7 @@ sub deploy_algorand
     }
 
     $proc = $genworker->send(
-	[ $NETWORK_TEMPLATE_PATH, $NODEFILE_PATH, $CLIENTFILE_PATH ],
+	[ $NETWORK_TEMPLATE_PATH, $NODEFILE_PATH ],
 	TARGET => 'deploy/algorand/'
 	);
     if ($proc->wait() != 0) {
@@ -282,14 +340,16 @@ sub deploy_algorand
     $proc = $RUNNER->run(
 	$genworker,
 	[ 'deploy-algorand-worker', 'generate', $NETWORK_TEMPLATE_NAME,
-	  $NODEFILE_NAME, $CLIENTFILE_NAME ]
+	  $NODEFILE_NAME ]
 	);
     if ($proc->wait() != 0) {
 	die ("failed to generate algorand testnet");
     }
 
     $proc = $genworker->recv(
-	[ 'deploy/algorand/network', 'deploy/algorand/chain.yml' ],
+	[ 'deploy/algorand/' . $NETWORK_NAME,
+	  'deploy/algorand/' . $CHAINEXTRA_NAME
+	],
 	TARGET => $ENV{MINION_PRIVATE}
 	);
     if ($proc->wait() != 0) {
@@ -301,8 +361,7 @@ sub deploy_algorand
 	  'deploy/algorand/network',
 	  'deploy/algorand/chain.yml',
 	  'deploy/algorand/' . $NETWORK_TEMPLATE_NAME,
-	  'deploy/algorand/' . $NODEFILE_NAME,
-	  'deploy/algorand/' . $CLIENTFILE_NAME ]
+	  'deploy/algorand/' . $NODEFILE_NAME ]
 	)->wait();
 
 
@@ -310,36 +369,15 @@ sub deploy_algorand
     # nodes.
     #
 
-    build_chainconfig($CHAINCONFIG_PATH, \@clients,
-		      $ENV{MINION_PRIVATE} . '/chain.yml');
+    build_chainconfig($CHAINCONFIG_PATH, $nodes, $CHAINEXTRA_PATH);
 
-    for ($i = 0; $i < scalar(@nodes); $i++) {
-	$proc = $actors->{'node'}->{$nodes[$i]}->send(
-	    [ $NETWORK_PATH . '/n' . $i ],
-	    TARGET => 'deploy/algorand/node'
-	    );
-	push(@procs, $proc);
-    }
-
-    for ($i = 0; $i < scalar(@clients); $i++) {
-	$proc = $actors->{'client'}->{$clients[$i]}->send(
-	    [ $NETWORK_PATH . '/c' . $i ],
-	    TARGET => 'deploy/algorand/client'
-	    );
-	push(@procs, $proc);
-    }
-
-    @statuses = Minion::System::Pgroup->new(\@procs)->waitall();
-
-    if (grep { $_->exitstatus() != 0 } @statuses) {
-	die ("cannot dispatch algorand network to workers");
-    }
+    dispatch($nodes, $NETWORK_PATH);
 
 
     # Cleanup before to finish.
     #
 
-    unlink($ACTORS_LIST_PATH);
+    unlink($NODE_LIST_PATH);
 
     return 1;
 }

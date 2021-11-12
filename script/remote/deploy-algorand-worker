@@ -87,24 +87,33 @@ kill_kmd_processes() {
 set_goal_network_address() {
     local netroot="$1" ; shift
     local nodefile="$1" ; shift
-    local clientfile="$1" ; shift
-    local nodenum clientnum i addr
+    local nodenum i peerport clientport
 
     nodenum=$(cat "${nodefile}" | wc -l)
-    clientnum=$(cat "${clientfile}" | wc -l)
 
     for i in $(seq 1 ${nodenum}) ; do
-	addr=$(tail -n +${i} "${nodefile}" | head -n 1 \
-		   | sed -r 's/^.*:/0.0.0.0:/')
-	sed -ri 's/"NetAddress":.*/"NetAddress": "'"${addr}"'",/' \
-	    "${netroot}/n$(( i - 1 ))/config.json"
-    done
+	peerport=$(tail -n +${i} "${nodefile}" | head -n 1 | cut -d':' -f2)
+	clientport=$(tail -n +${i} "${nodefile}" | head -n 1 | cut -d':' -f3)
 
-    for i in $(seq 1 ${clientnum}) ; do
-	addr=$(tail -n +${i} "${clientfile}" | head -n 1 \
-		   | sed -r 's/^.*:/localhost:/')
-	sed -ri 's/\{/\{\n\t"EndpointAddress": "'"${addr}"'",/' \
-	    "${netroot}/c$(( i - 1 ))/config.json"
+	# Set correct port to use as blockchain node.
+	#
+	sed -ri 's/"NetAddress":.*/"NetAddress": "'"0.0.0.0:${peerport}"'",/' \
+	    "${netroot}/n$(( i - 1 ))/config.json"
+
+	# Remove the limit on the number of incoming connections.
+	#
+	sed -ri 's/\{/\{\n\t"ConnectionsRateLimitingWindowSeconds": 0,/' \
+	    "${netroot}/n$(( i - 1 ))/config.json"
+
+	# Set correct port to use as blockchain endpoint (for clients).
+	#
+	sed -ri 's/\{/\{\n\t"EndpointAddress": "'":${clientport}"'",/' \
+	    "${netroot}/n$(( i - 1 ))/config.json"
+
+	# Enable deployment of smart contracts.
+	#
+	sed -ri 's/\{/\{\n\t"EnableDeveloperAPI": true,/' \
+	    "${netroot}/n$(( i - 1 ))/config.json"
     done
 }
 
@@ -124,11 +133,9 @@ set_goal_network_address() {
 generate_start_scripts() {
     local netroot="$1" ; shift
     local nodefile="$1" ; shift
-    local clientfile="$1" ; shift
-    local nodenum clientnum i addr peers sep
+    local nodenum i addr peers sep
 
     nodenum=$(cat "${nodefile}" | wc -l)
-    clientnum=$(cat "${clientfile}" | wc -l)
     sep=''
 
     for i in $(seq 1 ${nodenum}) ; do
@@ -142,17 +149,10 @@ generate_start_scripts() {
 	    fi
 	) > "${netroot}/n$(( i - 1 ))/start"
 	chmod 755 "${netroot}/n$(( i - 1 ))/start"
-	addr=$(tail -n +${i} "${nodefile}" | head -n 1)
+
+	addr=$(tail -n +${i} "${nodefile}" | head -n 1 | cut -d':' -f1,2)
 	peers="${peers}${sep}${addr}"
 	sep=';'
-    done
-
-    for i in $(seq 1 ${clientnum}) ; do
-	(
-	    echo "#!/bin/bash"
-	    echo 'exec goal node start --datadir "${0%/*}" --peer '"'${peers}'"
-	) > "${netroot}/c$(( i - 1 ))/start"
-	chmod 755 "${netroot}/c$(( i - 1 ))/start"
     done
 }
 
@@ -163,16 +163,16 @@ generate_start_scripts() {
 #
 generate_algod_tokens() {
     local netroot="$1" ; shift
-    local clientfile="$1" ; shift
-    local clientnum i token
+    local nodefile="$1" ; shift
+    local nodenum clientnum i token path
 
-    clientnum=$(cat "${clientfile}" | wc -l)
+    nodenum=$(cat "${nodefile}" | wc -l)
 
     token='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
-    for i in $(seq 1 ${clientnum}) ; do
-	clipath="${netroot}/c$(( i - 1 ))"
-	printf "%s" "${token}" > "${clipath}/algod.token"
+    for i in $(seq 1 ${nodenum}) ; do
+	path="${netroot}/n$(( i - 1 ))"
+	printf "%s" "${token}" > "${path}/algod.token"
     done
 }
 
@@ -189,7 +189,7 @@ generate_chainconfig() {
 	echo 'extra:'
 	echo '  - accounts:'
 
-	for datadir in "${netroot}/c"*/ ; do
+	for datadir in "${netroot}/n"*/ ; do
 	    goal account list --datadir "${datadir}" | awk '{print $2}' \
 		| while read account ; do
 		echo "    - address:  ${account}"
@@ -228,15 +228,12 @@ generate() {
 	fatal "missing template operand"
     elif [ $# -lt 2 ] ; then
 	fatal "missing nodefile operand"
-    elif [ $# -lt 3 ] ; then
-	fatal "missing clientfile operand"
-    elif [ $# -gt 3 ] ; then
+    elif [ $# -gt 2 ] ; then
 	fatal "unexpected operand '$4'"
     fi
 
     local template="${deploy_root}/$1" ; shift
     local nodefile="${deploy_root}/$1" ; shift
-    local clientfile="${deploy_root}/$1" ; shift
     local logfile="${deploy_root}/generate.log"
     local netroot="${deploy_root}/network"
 
@@ -253,9 +250,9 @@ generate() {
     fi
 
     kill_kmd_processes "${netroot}"
-    set_goal_network_address "${netroot}" "${nodefile}" "${clientfile}"
-    generate_start_scripts "${netroot}" "${nodefile}" "${clientfile}"
-    generate_algod_tokens "${netroot}" "${clientfile}"
+    set_goal_network_address "${netroot}" "${nodefile}"
+    generate_start_scripts "${netroot}" "${nodefile}"
+    generate_algod_tokens "${netroot}" "${nodefile}"
     generate_chainconfig "${netroot}"
 
     rm "${netroot}/genesis.json"  # already in each node
