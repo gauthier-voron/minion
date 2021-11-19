@@ -1,0 +1,18 @@
+name: "Smart contract test workload"
+description: "A small workload to check smart contracts"
+secondaries: 0
+threads: 0
+bench:
+  type: "contract"
+  txs:
+    0:    10
+    19:   10
+contract:
+  path: "synced"
+  functions:
+    - name: "Add"
+      ftype: "write"
+      ratio: 75
+    - name: "Sub"
+      ftype: "write"
+      ratio: 25
