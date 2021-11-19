@@ -1,213 +1,556 @@
 #!/usr/bin/perl -l
 
-use lib qw(. ./lib);
+use lib qw(. lib);
 use strict;
 use warnings;
 
-use Carp qw(confess);
+use Getopt::Long qw(GetOptionsFromArray);
 
 use Minion::Aws;
 use Minion::Aws::Fleet;
 use Minion::Aws::Image;
 use Minion::Run::Runner;
-use Minion::Shell;
 use Minion::StaticFleet;
 
 
-sub new_fleet
-{
-    my ($image, $secgroup, $fleet);
+my $PROGNAME = 'minion';
 
-    printf("Starting new fleet...\n");
+my $BOOT_IMAGE = '*ubuntu*20.04*amd64*server*';
+my $BOOT_USER   = 'ubuntu';
+my $BOOT_REGION = 'eu-central-1';
+my $BOOT_SECGRP = 'default';
+my $BOOT_RESIZE = 32;
+my @BOOT_CHAINS = qw(algorand quorum poa);
+
+my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa);
+
+
+sub run
+{
+    my ($id, $chain, $load, %opts) = @_;
+    my ($fleet, $instance, $size, $runner, $log, %copts);
+    my ($diablo, $nodes);
+
+    if ($id !~ /^sfr(?:-[0-9a-f]+)+$/) {
+	fatal("invalid id operand: '$id'");
+    }
+
+    if (!grep { $chain eq $_ } @RUN_CHAINS) {
+	fatal("invalid chain operand: '$chain'");
+    }
+
+    if (defined($size = $opts{SIZE})) {
+	if ($size !~ /^\d+$/) {
+	    fatal("invalid value for '--size': '$size'");
+	}
+    }
+
+    $fleet = Minion::Aws::Fleet->new(
+	$id,
+	REGION => $BOOT_REGION,
+	USER => $BOOT_USER
+	);
+
+    if ($opts{VERBOSE}) {
+	printf("Joining spot instances");
+    }
+
+    foreach $instance ($fleet->members()) {
+	if ($instance->execute(['true'], STDERR => '/dev/null')->wait() != 0) {
+	    fatal("cannot join instance '" . $instance->public_ip() . "'");
+	}
+    }
+
+    if (!defined($size)) {
+	$size = scalar($fleet->members());
+    } elsif (($size + 1) > scalar($fleet->members())) {
+	fatal("cannot use more than " . (scalar($fleet->members()) - 1) .
+	      "instances");
+    } else {
+	$size = $size + 1;
+    }
+
+    $runner = Minion::Run::Runner->new(
+	LOCAL  => [ './script/local' ],
+	REMOTE => [ './script/remote' ]
+	);
+
+    $diablo = Minion::StaticFleet->new([ ($fleet->members())[0] ]);
+    $nodes = Minion::StaticFleet->new([ ($fleet->members())[1 .. ($size-1)] ]);
+
+    if ($opts{VERBOSE}) {
+	printf(": done\n");
+	printf("Diablo node:\n  - %s\n", ($diablo->members())[0]->public_ip());
+	printf("Blockchain nodes:\n");
+	foreach $instance ($nodes->members()) {
+	    printf("  - %s\n", $instance->public_ip());
+	}
+    }
+
+    if (defined($opts{DIABLO})) {
+	if ($opts{VERBOSE}) {
+	    printf("Updating Diablo...\n");
+	}
+
+	$log = '';
+	$copts{STDOUT} = \$log;
+	$copts{STDERR} = \$log;
+	$copts{STDOUTS} = \$log;
+	$copts{STDERRS} = \$log;
+
+	if ($runner->run($diablo, [ 'install-diablo-dev', $opts{DIABLO} ],
+			 %copts)->wait() != 0) {
+	    printf(STDERR "%s", $log);
+	    fatal("cannot install Diablo from local sources '" .
+		  $opts{DIABLO} . "'");
+	}
+    }
+
+    if (defined($opts{SYNC})) {
+	if ($opts{VERBOSE}) {
+	    printf("Syncing '%s'...\n", $opts{SYNC});
+	}
+
+	$fleet->execute(
+	    [ 'rm', '-rf', 'synced' ],
+	    STDERRS => '/dev/null'
+	    )->waitall();
+
+	if (grep { $_->exitstatus() != 0 }
+	    $fleet->send([ $opts{SYNC} ], TARGETS => 'synced' )->waitall()) {
+	    fatal("cannot sync '" . $opts{SYNC} . "'");
+	}
+    }
+
+    if ($opts{VERBOSE}) {
+        printf("Configuring diablo node");
+	local $| = 1;
+    }
+
+    if ($runner->run($diablo,['behave-diablo', 'primary', $load])->wait()!=0) {
+	fatal("cannot configure diablo primary");
+    }
+    if ($runner->run($diablo, ['behave-diablo', 'secondary' ])->wait() != 0) {
+	fatal("cannot configure diablo secondary");
+    }
+
+    if ($opts{VERBOSE}) {
+	printf(": done\n");
+        printf("Configuring blockchain nodes");
+	local $| = 1;
+    }
+
+    if ($runner->run($nodes, [ 'behave-' . $chain ])->wait() != 0) {
+	fatal("cannot configure $chain nodes");
+    }
+
+    if ($opts{VERBOSE}) {
+	printf(": done\n");
+        printf("Deploying");
+	local $| = 1;
+    }
+
+    if ($runner->run($fleet, [ 'deploy' ])->wait() != 0) {
+	fatal("cannot deploy");
+    }
+
+    if ($opts{VERBOSE}) {
+	printf(": done\n");
+        printf("Start blockchain nodes");
+	local $| = 1;
+    }
+
+    if ($runner->run($nodes, [ $chain, 'start' ])->wait() != 0) {
+	fatal("cannot start $chain nodes");
+    }
+
+    if ($opts{VERBOSE}) {
+	printf(": done\n");
+        printf("Start diablo node");
+	local $| = 1;
+    }
+
+    if ($runner->run($diablo, [ 'diablo', 'start' ])->wait() != 0) {
+	if ($opts{VERBOSE}) {
+	    printf(": fail\n");
+	    printf("Stop blockchain nodes");
+	    local $| = 1;
+	}
+
+	$runner->run($nodes, [ $chain, 'stop' ])->wait();
+
+	if ($opts{VERBOSE}) {
+	    printf(": done\n");
+	}
+
+	fatal("cannot start diablo node");
+    }
+
+    if ($opts{VERBOSE}) {
+	printf(": done\n");
+	printf("Waiting for benchmark termination...");
+	local $_ = 1;
+    }
+
+    $runner->run($diablo, [ 'diablo', 'wait' ])->wait();
+
+    if ($opts{VERBOSE}) {
+	printf("\nStop blockchain nodes");
+	local $| = 1;
+    }
+
+    $runner->run($nodes, [ $chain, 'stop' ])->wait();
+
+    if ($opts{VERBOSE}) {
+	printf(": done\n");
+    }
+
+    return 0;
+}
+
+sub boot
+{
+    my (%opts) = @_;
+    my ($duration, $key, $size, $log, %copts);
+    my ($image, $secgroup, $fleet, $instance, $runner, $chain, $proc, @procs);
+
+    if (!defined($duration = $opts{DURATION})) {
+	$duration = 3600;
+    } elsif ($duration !~ /^\d+$/) {
+	fatal("invalid value for '--duration': '$duration'");
+    }
+
+    if (!defined($key = $opts{KEY})) {
+	$key = '';
+    }
+
+    if (!defined($size = $opts{SIZE})) {
+	$size = 4;
+    } elsif ($size !~ /^\d+$/) {
+	fatal("invalid value for '--size': '$size'");
+    }
+
+    $SIG{INT} = sub { exit (0) };
+
+    if ($opts{VERBOSE}) {
+	printf("Looking for image '%s' in region '%s'", $BOOT_IMAGE,
+	       $BOOT_REGION);
+	local $| = 1;
+    }
 
     $image = Minion::Aws::find_images(
-	'*ubuntu*20.04*amd64*server*',
-	REGIONS  => [ 'eu-central-1' ]
-	)->get()->{'eu-central-1'};
+	$BOOT_IMAGE,
+	REGIONS  => [ $BOOT_REGION ]
+	)->get()->{$BOOT_REGION};
 
-    printf("Found image %s\n", $image->id());
+    if (!defined($image)) {
+	fatal("cannot find image '$BOOT_IMAGE' in region '$BOOT_REGION'");
+    }
+
+    if ($opts{VERBOSE}) {
+	printf(": found '%s'\n", $image->id());
+	printf("Looking for security group '%s' in region '%s'", $BOOT_SECGRP,
+	       $BOOT_REGION);
+	local $| = 1;
+    }
 
     $secgroup = Minion::Aws::find_secgroups(
 	'default',
 	REGIONS  => [ 'eu-central-1' ]
 	)->get()->{'eu-central-1'};
 
-    printf("Found secgroup %s\n", $secgroup);
+    if (!defined($image)) {
+	fatal("cannot security group '$BOOT_SECGRP' in region '$BOOT_REGION'");
+    }
+
+    if ($opts{VERBOSE}) {
+	printf(": found '%s'\n", $secgroup);
+	printf("Launching spot fleet with key '%s' for %d seconds",
+	       $key, $duration);
+	local $| = 1;
+    }
 
     $fleet = Minion::Aws::Fleet->launch(
 	$image->id(),
 	'c5.xlarge',
-	KEY      => 'gauthier',
+	KEY      => $key,
 	PRICE    => 1.0,
-	REGION   => 'eu-central-1',
+	REGION   => $BOOT_REGION,
 	SECGROUP => $secgroup,
-	SIZE     => 6,
-	TIME     => 3600,
-	USER     => 'ubuntu',
+	SIZE     => ($size + 1),
+	TIME     => $duration,
+	USER     => $BOOT_USER,
 	)->get();
 
-    printf("Got new fleet '%s'\n", $fleet->id());
-
-    return $fleet;
-}
-
-sub get_fleet
-{
-    my ($id) = @_;
-    my ($fleet);
-
-    printf("Get existing fleet '%s'\n", $id);
-
-    $fleet = Minion::Aws::Fleet->new(
-	$id,
-	USER => 'ubuntu'
-	);
-
-    return $fleet;
-}
-
-sub main
-{
-    my $fleet_id  = undef;
-    my $installed = defined($fleet_id);
-    my ($fleet, $instance, $runner, $nodes, $primary, $secondary);
-
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-    $SIG{INT} = sub { exit (0) };
-
-    if (defined($fleet_id)) {
-	$fleet = get_fleet($fleet_id);
-    } else {
-	$fleet = new_fleet();
-
-	printf("Joining fleet instances");
-
-	foreach $instance ($fleet->members()) {
-	    while($instance->execute(['true'],STDERR=>'/dev/null')->wait()!=0){
-		sleep(10);
-		printf(".");
-		$| = 1;
-	    }
-	}
-
-	printf("\n");
-    }
-
     if (!defined($fleet)) {
-	printf("Error: undefined fleet\n");
-	exit (1);
+	fatal("cannot get new fleet\n");
     }
 
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-    $SIG{QUIT} = sub {
-	printf("Canceling fleet %s\n", $fleet->id());
-	$fleet->cancel()->get();
+    $SIG{INT} = sub {
+	if ($opts{VERBOSE}) {
+	    printf("Canceling fleet %s\n", $fleet->id());
+	    $fleet->cancel()->get();
+	}
 	exit (0)
     };
 
-    printf("Fleet instances:\n");
-    foreach $instance ($fleet->members()) {
-	printf("  - %s\n", $instance->public_ip());
+
+    if ($opts{VERBOSE}) {
+	printf(": launched '%s'\n", $fleet->id());
+	printf("Joining spot instances");
     }
 
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    foreach $instance ($fleet->members()) {
+	while($instance->execute(['true'], STDERR => '/dev/null')->wait()!=0) {
+	    sleep(1);
+
+	    if ($opts{VERBOSE}) {
+		printf(".");
+		local $| = 1;
+	    }
+	}
+    }
+
+    if ($opts{VERBOSE}) {
+	printf(": done\n");
+	printf("Fleet instances:\n");
+	foreach $instance ($fleet->members()) {
+	    printf("  - %s\n", $instance->public_ip());
+	}
+    }
+
+    if (defined($BOOT_RESIZE)) {
+	if ($opts{VERBOSE}) {
+	    printf("Resizing instances disks to %d GB", $BOOT_RESIZE);
+	    local $| = 1;
+	}
+
+	foreach $instance ($fleet->members()) {
+	    $proc = $instance->resize($BOOT_RESIZE);
+	    push(@procs, $proc);
+	}
+
+	foreach $proc (@procs) {
+	    if ($proc->wait() != 0) {
+		$fleet->cancel()->get();
+		fatal("cannot resize disk of instance '" .
+		      $instance->public_ip() . "'");
+	    }
+	}
+
+	if ($opts{VERBOSE}) {
+	    printf(": done\n");
+	}
+    }
+    
+    if ($opts{VERBOSE}) {
+	printf("Installing instances\n");
+    } else {
+	$copts{STDOUT} = \$log;
+	$copts{STDERR} = \$log;
+	$copts{STDOUTS} = \$log;
+	$copts{STDERRS} = \$log;
+    }
 
     $runner = Minion::Run::Runner->new(
-	ERR    => sub { printf(STDERR "ERR: %s\n", shift()) if (@_); },
 	LOCAL  => [ './script/local' ],
-	# LOG    => sub { printf("LOG: %s\n", shift()) if (@_); },
 	REMOTE => [ './script/remote' ]
 	);
 
-    if (!$installed) {
-	printf("Preparing installation...\n");
-	if ($runner->run($fleet, [ 'prepare-install' ])->wait() != 0) {
-	    return 1;
+    $log = '';
+    if ($runner->run($fleet, [ 'prepare-install' ], %copts)->wait() != 0) {
+	$fleet->cancel()->get();
+	printf(STDERR "%s", $log);
+	fatal("cannot prepare install");
+    }
+
+    $log = '';
+    if (defined($opts{DIABLO})) {
+	if ($runner->run(
+		$fleet,
+		[ 'install-diablo-dev', $opts{DIABLO} ],
+		%copts)->wait() != 0) {
+	    $fleet->cancel()->get();
+	    printf(STDERR "%s", $log);
+	    fatal("cannot install Diablo from local sources '" .
+		  $opts{DIABLO} . "'");
 	}
-
-	printf("Installing Algorand...\n");
-	if ($runner->run($fleet, [ 'install-algorand' ])->wait() != 0) {
-	    return 1;
+    } else {
+	if ($runner->run($fleet, [ 'install-diablo' ], %copts)->wait() != 0) {
+	    $fleet->cancel()->get();
+	    printf(STDERR "%s", $log);
+	    fatal("cannot install Diablo");
 	}
     }
 
-    printf("Installing Diablo...\n");
-    if ($runner->run(
-	    $fleet,
-	    [ 'install-diablo-dev', 'test-diablo' ]
-	)->wait() != 0) {
-
-	return 1;
-
+    foreach $chain (@BOOT_CHAINS) {
+	$log = '';
+	if ($runner->run($fleet, [ 'install-'.$chain ], %copts)->wait() != 0) {
+	    $fleet->cancel()->get();
+	    printf(STDERR "%s", $log);
+	    fatal("cannot install $chain");
+	}
     }
 
-    $primary = Minion::StaticFleet->new([ ($fleet->members())[0] ]);
-    $secondary = Minion::StaticFleet->new([ ($fleet->members())[1] ]);
-    $nodes = Minion::StaticFleet->new([ ($fleet->members())[2..5] ]);
-
-    printf("Diablo Primary: %s\n", ($primary->members())[0]->public_ip());
-    printf("Diablo Secondary: %s\n", ($primary->members())[0]->public_ip());
-    printf("Algorand Nodes:\n");
-    foreach $instance ($nodes->members()) {
-	printf("  - %s\n", $instance->public_ip());
+    $log = '';
+    if ($runner->run($fleet, [ 'install-geth-accounts', '--number=1000' ],
+		     %copts)->wait() != 0) {
+	$fleet->cancel()->get();
+	printf(STDERR "%s", $log);
+	fatal("cannot install geth-accounts");
     }
 
-    printf("Setting Algorand nodes\n");
-    if ($runner->run($nodes, [ 'behave-algorand', 'node' ])->wait() != 0) {
-	return 1;
+    if ($opts{VERBOSE}) {
+	printf("Boot process complete!\n");
+	printf("Fleet instances:\n");
+	foreach $instance ($fleet->members()) {
+	    printf("  - %s\n", $instance->public_ip());
+	}
+	printf("Fleet id: ");
     }
 
-    printf("Setting Algorand clients\n");
-    if ($runner->run($secondary, [ 'behave-algorand', 'client' ])->wait() !=0){
-	return 1;
+    printf("%s\n", $fleet->id());
+
+    if ($opts{VERBOSE}) {
+	printf("To stop the fleet, type Ctrl-C\n");
     }
 
-    printf("Setting Diablo primary\n");
-    if ($runner->run($primary, [ 'behave-diablo', 'primary' ])->wait() != 0) {
-	return 1;
+    sleep($duration);
+
+    if ($opts{VERBOSE}) {
+	printf("Cancelling fleet\n");
     }
 
-    printf("Setting Diablo secondaries\n");
-    if ($runner->run($secondary, ['behave-diablo','secondary'])->wait() != 0) {
-	return 1;
-    }
-
-    printf("Deploy\n");
-    if ($runner->run($fleet, [ 'deploy' ])->wait() != 0) {
-	return 1;
-    }
-
-    printf("Start Algorand\n");
-    if ($runner->run($fleet, [ 'algorand', 'start' ])->wait() != 0) {
-	return 1;
-    }
-
-    printf("Start Diablo\n");
-    if ($runner->run($fleet, [ 'diablo', 'start' ])->wait() != 0) {
-	printf("Stop Algorand\n");
-	$runner->run($fleet, [ 'algorand', 'stop' ])->wait();
-	return 1;
-    }
-
-    printf("System is running...\n");
-    # <STDIN>;
-    sleep(300);
-
-    printf("Stop Diablo\n");
-    $runner->run($fleet, [ 'diablo', 'stop' ])->wait();
-
-    printf("Stop Algorand\n");
-    $runner->run($fleet, [ 'algorand', 'stop' ])->wait();
-
-    printf("Diablo Primary: %s\n", ($primary->members())[0]->public_ip());
-    printf("Diablo Secondary: %s\n", ($primary->members())[0]->public_ip());
-
-    printf("Fleet id: '%s'\n", $fleet->id());
+    $fleet->cancel()->get();
 
     return 0;
 }
 
 
+sub fatal
+{
+    my ($msg) = @_;
+
+    printf(STDERR "%s: %s\n", $PROGNAME, $msg);
+    printf(STDERR "Please type '%s --help' for more information\n", $0);
+
+    exit (1);
+}
+
+sub usage
+{
+    return <<"EOF";
+Usage: $0 boot [--duration=<int>] [--key=<name>] [--size=<int>]  (1)
+       $0 run [--size=<int>] [--sync=<path>] <id> <chain> <load> (2)
+
+(1) Boot a new fleet on AWS and pre-install nodes with Diablo and various
+    blockchains. Print the fleet <id> for further use.
+
+(2) Deploy and run a blockchain of type <chain> and use Diablo to apply a
+    workload described in <load> on the booted fleet <id>.
+
+Options:
+
+  -d, --duration <int>        Keep the nodes alive for <int> seconds from the
+                              boot time. After this duration, the nodes halt
+                              by themselves.
+
+  -D, --diablo-dev <path>     (1) Install Diablo from the <path> sources
+                                  instead of official repository.
+                              (2) Update Diablo from <path> sources and rebuild
+                                  it before running the benchmark.
+
+  -h, --help                  Print this message and exit.
+
+  -k, --key <name>            Instanciate AWS nodes to accept the AWS SSH key
+                              called <name>.
+
+  -s, --size <int>            (1) Boot <int> + 1 nodes (1 extra node = Diablo)
+                              (2) Run the blockchain on <int> nodes
+
+  -S, --sync <path>           Synchronize the local <path> to all the AWS nodes
+                              as remote path 'synced' before running the test.
+
+  -v, --verbose               Print what is happening.
+
+Chains:
+
+  Identifier   Full name     Consensus        Smart contract  
+  -----------  ------------  ---------        ---------------
+
+  algorand     Algorand      BA* (BFT)        Teal (.teal)
+
+  poa          Ethereum PoA  Clique (BFT)     Solidity (.sol)
+
+  quorum-ibft  Quorum        IBFT (BFT)       Solidity (.sol)
+
+  quorum-raft  Quorum        Raft (CFT)       Solidity (.sol)
+
+EOF
+}
+
+sub main
+{
+    my ($action, $id, $chain, $load, @err);
+    my ($duration, $diablo, $key, $size, $sync, $verbose);
+
+    GetOptionsFromArray(
+	\@_,
+	'd|duration=i'   => \$duration,
+	'D|diablo-dev=s' => \$diablo,
+	'h|help'         => sub { printf(usage()); exit (0); },
+	'k|key=s'        => \$key,
+	's|size=s'       => \$size,
+	'S|sync=s'       => \$sync,
+	'v|verbose'      => \$verbose
+	);
+
+    ($action, $id, $chain, $load, @err) = @_;
+
+    if (!defined($action)) {
+	fatal('missing action operand');
+    }
+
+    if ($action eq 'boot') {
+	if (defined($id)) {
+	    fatal("unexpected operand '$id'");
+	} elsif (defined($chain)) {
+	    fatal("unexpected operand '$chain'");
+	} elsif (defined($load)) {
+	    fatal("unexpected operand '$load'");
+	} elsif (@err) {
+	    fatal("unexpected operand '" . shift(@err) . "'");
+	} elsif (defined($sync)) {
+	    fatal("unexpected option '--sync' for $action");
+	}
+
+	return boot(DURATION => $duration, DIABLO => $diablo, KEY => $key,
+		    SIZE => $size, VERBOSE => $verbose);
+    }
+
+    if ($action eq 'run') {
+	if (!defined($id)) {
+	    fatal('missing id operand');
+	} elsif (!defined($chain)) {
+	    fatal('missing chain operand');
+	} elsif (!defined($load)) {
+	    fatal('missing load operand');
+	} elsif (@err) {
+	    fatal("unexpected operand '" . shift(@err) . "'");
+	} elsif (defined($duration)) {
+	    fatal("unexpected option '--duration' for $action");
+	} elsif (defined($key)) {
+	    fatal("unexpected option '--key' for $action");
+	}
+
+	return run($id, $chain, $load, DIABLO => $diablo, SIZE => $size,
+		   SYNC => $sync, VERBOSE => $verbose);
+    }
+
+    fatal("unknown action '$action'");
+
+    return 1;
+}
+
 exit (main(@ARGV));
+__END__
