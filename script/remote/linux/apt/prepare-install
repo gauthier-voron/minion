@@ -5,11 +5,26 @@
 
 set -e
 
+
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
     exit 1
 fi
 
+
+mp="${PWD}"
+while ! mountpoint --quiet "${mp}" ; do
+    mp="${mp%/*}"
+    if [ "x${mp}" = 'x' ] ; then
+	mp='/'
+    fi
+done
+part="$(mount | grep ' on '"${mp}"' ' | cut -d' ' -f1)"
+dev="$(basename "$(readlink -f "/sys/class/block/${part##*/}/..")")"
+sudo growpart "/dev/${dev}" 1 || true
+sudo resize2fs "${part}" || true
+
+
 sudo -n apt-get update -yy
 
-sudo -n apt-get install psmisc
+sudo -n apt-get install 'psmisc'

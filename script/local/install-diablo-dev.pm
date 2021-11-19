@@ -12,43 +12,69 @@ my %PARAMS = @_;
 my $RUNNER = $PARAMS{RUNNER};
 
 my ($from) = @ARGV;
-my ($pgrp, $worker, $proc, $idx, @outs, @errs, $ws);
+my ($pgrp, $worker, $proc, $idx, @outs, @errs, $ws, $retry, $failed);
 
-$pgrp = Minion::System::Pgroup->new([]);
+$retry = 0;
 
-foreach $worker ($FLEET->members()) {
-    my @cmd = (
-	 'rsync', '-aAHX',
-	 '-e', 'ssh -o StrictHostKeyChecking=no ' .
-	           '-o UserKnownHostsFile=/dev/null ' .
-	           '-o LogLevel=ERROR',
-	 $from . '/',
-	 'ubuntu@' . $worker->public_ip() . ':diablo-sources/'
-	);
+loop: while (1) {
+    $pgrp = Minion::System::Pgroup->new([]);
 
-    $idx = scalar(@outs);
+    foreach $worker ($FLEET->members()) {
+	my @cmd = (
+	    'rsync', '-aAHXv',
+	    '-e', 'ssh -o StrictHostKeyChecking=no ' .
+	              '-o UserKnownHostsFile=/dev/null ' .
+	              '-o LogLevel=ERROR',
+	    $from . '/',
+	    'ubuntu@' . $worker->public_ip() . ':diablo-sources/'
+	    );
 
-    push(@outs, '');
-    push(@errs, '');
+	$idx = scalar(@outs);
 
-    $proc = Minion::System::Process->new(
-	\@cmd,
-	STDOUT => \$outs[$idx],
-	STDERR => \$errs[$idx]
-	);
+	push(@outs, '');
+	push(@errs, '');
 
-    $pgrp->add($proc);
-}
+	$proc = Minion::System::Process->new(
+	    \@cmd,
+	    STDOUT => \$outs[$idx],
+	    STDERR => \$errs[$idx]
+	    );
 
-$idx = 0;
-
-foreach $ws ($pgrp->waitall()) {
-    if ($ws->exitstatus() != 0) {
-	printf("rsync[%d] failed:\n", $idx);
-	printf("%s%s\n", $outs[$idx], $errs[$idx]);
+	$pgrp->add($proc);
     }
 
-    $idx += 1;
+    if ($retry == 0) {
+	foreach $ws ($pgrp->waitall()) {
+	    if ($ws->exitstatus() != 0) {
+		$proc = $RUNNER->run(
+		    $FLEET,
+		    [ 'install-diablo-dev-worker' ]);
+		if ($proc->wait() != 0) {
+		    die ("cannot install diablo on workers");
+		}
+
+		$retry = 1;
+		next loop;
+	    }
+	}
+    } else {
+	$idx = 0;
+	$failed = 0;
+	foreach $ws ($pgrp->waitall()) {
+	    if ($ws->exitstatus() != 0) {
+		printf(STDOUT "%s", $outs[$idx]);
+		printf(STDERR "%s", $errs[$idx]);
+		$failed += 1;
+	    }
+	    $idx += 1;
+	}
+
+	if ($failed > 0) {
+	    die ("$failed workers failed to sync");
+	}
+    }
+
+    last;
 }
 
 $proc = $RUNNER->run($FLEET, ['install-diablo-dev-worker' , 'diablo-sources']);
