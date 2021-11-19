@@ -696,6 +696,132 @@ sub describe_spot_fleet_request_history
     return $class->new(\@command, %copts);
 }
 
+sub describe_volumes
+{
+    my ($class, %opts) = @_;
+    my (%copts, @command, $logger, $value, $dict, $key);
+
+    $logger = sub {};
+
+    @command = (__aws_base_command(), 'ec2', 'describe-volumes');
+
+    if (defined($value = $opts{ERR})) {
+	$copts{STDERR} = $value;
+	delete($opts{ERR});
+    }
+
+    if (defined($dict = $opts{FILTERS})) {
+	confess() if (ref($dict) ne 'HASH');
+	while (($key, $value) = each(%$dict)) {
+	    push(@command, '--filters', 'Name=' . $key . ',Values=' .
+		 encode_json($value));
+	}
+	delete($opts{FILTERS});
+    }
+
+    if (defined($value = $opts{LOG})) {
+	$logger = output_function($value);
+	delete($opts{LOG});
+    }
+
+    if (defined($value = $opts{QUERY})) {
+	confess() if (ref($value) ne '');
+	push(@command, '--query', $value);
+	delete($opts{QUERY});
+    }
+
+    confess(join(' ', keys(%opts))) if (%opts);
+
+    $logger->(__format_cmd(\@command));
+
+    return $class->new(\@command, %copts);
+}
+
+sub describe_volumes_modifications
+{
+    my ($class, %opts) = @_;
+    my (%copts, @command, $logger, $value, $dict, $key);
+
+    $logger = sub {};
+
+    @command = (__aws_base_command(), 'ec2', 'describe-volumes-modifications');
+
+    if (defined($value = $opts{ERR})) {
+	$copts{STDERR} = $value;
+	delete($opts{ERR});
+    }
+
+    if (defined($dict = $opts{FILTERS})) {
+	confess() if (ref($dict) ne 'HASH');
+	while (($key, $value) = each(%$dict)) {
+	    push(@command, '--filters', 'Name=' . $key . ',Values=' .
+		 encode_json($value));
+	}
+	delete($opts{FILTERS});
+    }
+
+    if (defined($value = $opts{IDS})) {
+	confess() if (ref($value) ne 'ARRAY');
+	confess() if (grep { ! m/^vol-[0-9a-f]+$/ } @$value);
+	push(@command, '--volume-ids', encode_json($value));
+	delete($opts{IDS});
+    }
+
+    if (defined($value = $opts{LOG})) {
+	$logger = output_function($value);
+	delete($opts{LOG});
+    }
+
+    if (defined($value = $opts{QUERY})) {
+	confess() if (ref($value) ne '');
+	push(@command, '--query', $value);
+	delete($opts{QUERY});
+    }
+
+    confess(join(' ', keys(%opts))) if (%opts);
+
+    $logger->(__format_cmd(\@command));
+
+    return $class->new(\@command, %copts);
+}
+
+sub modify_volume
+{
+    my ($class, $id, %opts) = @_;
+    my (%copts, @command, $logger, $value);
+
+    confess() if (!defined($id));
+    confess() if ($id !~ /^vol-[0-9a-f]+$/);
+
+    $logger = sub {};
+
+    @command = (__aws_base_command(), 'ec2', 'modify-volume', '--volume-id',
+		$id);
+
+    if (defined($value = $opts{ERR})) {
+	$copts{STDERR} = $value;
+	delete($opts{ERR});
+    }
+
+    if (defined($value = $opts{LOG})) {
+	$logger = output_function($value);
+	delete($opts{LOG});
+    }
+
+    if (defined($value = $opts{SIZE})) {
+	confess() if (ref($value) ne '');
+	confess() if ($value !~ /^\d+$/);
+	push(@command, '--size', $value);
+	delete($opts{SIZE});
+    }
+
+    confess(join(' ', keys(%opts))) if (%opts);
+
+    $logger->(__format_cmd(\@command));
+
+    return $class->new(\@command, %copts);
+}
+
 sub request_spot_fleet
 {
     my ($class, $image, $type, %opts) = @_;
