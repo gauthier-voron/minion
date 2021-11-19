@@ -1,0 +1,385 @@
+#!/bin/bash
+
+set -e
+
+script_name='deploy-poa-worker'
+install_root="${HOME}/install/poa"
+keyfile="${HOME}/install/geth-accounts/accounts.txt"
+deploy_root="${HOME}/deploy/poa"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 prepare <nodes...>                                     (1)"
+    echo "       $0 generate <nodefile> <keyfile>                          (2)"
+    echo
+    echo "(1) Prepare the deployment of an Ethereum Poa testnet by creating"
+    echo "    the deployment root and generating accounts with the given"
+    echo "    <names...>, each with an address and a private key. The private"
+    echo "    keys are protected by an empty password."
+    echo
+    echo "(2) Generate a testnet "
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find poa install at '${install_root}'"
+    fi
+
+    if [ ! -f "${keyfile}" ] ; then
+	fatal "cannot find geth accounts list at '${keyfile}'"
+    fi
+
+    export PATH="${install_root}/build/bin:${PATH}"
+
+    if ! command -v 'geth' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find geth executable in '${install_root}'"
+    fi
+
+    if ! command -v 'bootnode' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find bootnode executable in '${install_root}'"
+    fi
+
+    if ! command -v 'puppeth' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find puppeth executable in '${install_root}'"
+    fi
+}
+
+
+# Prepare action  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare() {
+    local logfile="$(mktemp --suffix='.log')"
+    local name dir port wsport
+
+    setup_environment
+
+    if [ -e "${deploy_root}" ] ; then
+	rm -rf "${deploy_root}"
+    fi
+
+    mkdir -p "${deploy_root}"
+
+    port=7000
+    wsport=9000
+
+    for name in "$@" ; do
+	dir="${deploy_root}/${name}"
+
+	mkdir "${dir}"
+
+	if ! printf "\n\n" | geth account new --datadir "${dir}" \
+				  > "${logfile}" 2> "${logfile}"
+	then
+	    cat "${logfile}" >&2
+	    rm "${logfile}"
+	    false
+	fi
+
+	echo ${port} > "${dir}/port"
+	echo ${wsport} > "${dir}/wsport"
+	touch "${dir}/password.txt"
+
+	port=$(( port + 1 ))
+	wsport=$(( wsport + 1 ))
+    done
+
+    rm "${logfile}"
+}
+
+
+# Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+generate_genesis() {
+    local genesis="$1" ; shift
+    local netroot="$1" ; shift
+    local tmp account address
+
+    tmp="$(mktemp -d --suffix='.d')"
+
+    # Make sure that there is no cached puppet configuration.
+    #
+    rm -rf "${HOME}/.puppeth"
+
+    # Create a new genesis block using puppeth.
+    #
+    (
+	set -e
+
+	echo 'private'   # network name
+	echo '2'         # configure new genesis
+	echo '1'         # create from scratch
+	echo '2'         # use clique consensus
+	echo ''          # use default block frequency
+
+	# Iterate over all accounts specified in the netroot and register their
+	# address as sealer nodes.
+	#
+	for dir in "${netroot}/"* ; do
+	    test -d "${dir}"
+	    test -d "${dir}/keystore"
+
+	    for address in "${dir}/keystore/UTC--"* ; do
+		test -f "${address}"
+		echo "${address##*--}"
+		break
+	    done
+	done
+	echo ''          # finish by empty line
+
+	# Pre-fund all accounts in keyfile.
+	# Note that sealers accounts are not funded.
+	#
+	while read account ; do
+	    address="$(echo "${account}" | cut -d':' -f1)"
+	    echo "${address}"
+	done < "${keyfile}"
+	echo ''          # finish by empty line
+
+	echo 'yes'       # pre-fund precompile-addresses
+	echo '10'        # set network id to 10
+
+	echo '2'         # manage existing genesis
+	echo '2'         # export genesis configuration
+	echo "${tmp}"    # export in temp directory
+    ) | puppeth > '/dev/null' || true
+    test -f "${tmp}/private.json"
+
+    # Rename new genesis file to expected name.
+    #
+    mv "${tmp}/private.json" "${genesis}"
+
+    # Delete temp directory.
+    #
+    rm -rf "${tmp}"
+
+    # Clean cached puppet configuration.
+    #
+    rm -rf "${HOME}/.puppeth"
+}
+
+setup_nodes() {
+    local netroot="$1" ; shift
+    local genesis="$1" ; shift
+    local logfile="$(mktemp --suffix='.log')"
+    local passfile="$(mktemp --suffix='.txt')"
+    local dir address pid
+
+    set -x
+
+    for dir in "${netroot}/"* ; do
+	test -d "${dir}"
+	test -d "${dir}/keystore"
+
+	if ! geth init --datadir "${dir}" "${genesis}" > "${logfile}" ; then
+	    cat "${logfile}" >&2
+	    rm "${logfile}"
+	    false
+	fi
+
+	for address in "${dir}/keystore/UTC--"* ; do
+	    test -f "${address}"
+	    address="${address##*--}"
+	    break
+	done
+
+	geth --datadir "${dir}" --nodiscover --allow-insecure-unlock \
+	     --unlock "${address}" --password "${passfile}" &
+	pid=$!
+
+	while [ ! -e "${dir}/geth.ipc" ] ; do
+	    ls "${dir}"
+	    sleep 0.1
+	done
+
+	geth attach "${dir}/geth.ipc" --exec 'admin.nodeInfo.enode'
+
+	kill ${pid}
+    done
+
+    rm "${logfile}" "${passfile}"
+}
+
+generate() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing netroot operand"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing genesis operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
+    fi
+
+    local netroot="$1" ; shift
+    local genesis="$1" ; shift
+    local tmp account address
+
+    setup_environment
+
+    tmp="$(mktemp -d --suffix='.d')"
+
+    # Make sure that there is no cached puppet configuration.
+    #
+    rm -rf "${HOME}/.puppeth"
+
+    # Create a new genesis block using puppeth.
+    #
+    (
+	set -e
+
+	echo 'private'   # network name
+	echo '2'         # configure new genesis
+	echo '1'         # create from scratch
+	echo '2'         # use clique consensus
+	echo ''          # use default block frequency
+
+	# Iterate over all accounts specified in the netroot and register their
+	# address as sealer nodes.
+	#
+	for dir in "${netroot}/"* ; do
+	    test -d "${dir}" || continue
+	    test -d "${dir}/keystore" || continue
+
+	    for address in "${dir}/keystore/UTC--"* ; do
+		test -f "${address}"
+		echo "${address##*--}"
+		break
+	    done
+	done
+	echo ''          # finish by empty line
+
+	# Pre-fund all accounts in keyfile.
+	# Note that sealers accounts are not funded.
+	#
+	while read account ; do
+	    address="$(echo "${account}" | cut -d':' -f1)"
+	    echo "${address}"
+	done < "${keyfile}"
+	echo ''          # finish by empty line
+
+	echo 'yes'       # pre-fund precompile-addresses
+	echo '10'        # set network id to 10
+
+	echo '2'         # manage existing genesis
+	echo '2'         # export genesis configuration
+	echo "${tmp}"    # export in temp directory
+    ) | puppeth > '/dev/null' || true
+    test -f "${tmp}/private.json"
+
+    # Rename new genesis file to expected name.
+    #
+    mv "${tmp}/private.json" "${genesis}"
+
+    # Delete temp directory.
+    #
+    rm -rf "${tmp}"
+
+    # Clean cached puppet configuration.
+    #
+    rm -rf "${HOME}/.puppeth"
+}
+
+setup() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing genesis operand"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing static operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
+    fi
+
+    local genesis="$1" ; shift
+    local static="$1" ; shift
+    local logfile="$(mktemp --suffix='.log')"
+    local dir address pid enode port
+
+    setup_environment
+
+    for dir in "${deploy_root}/"* ; do
+	test -d "${dir}" || continue
+	test -d "${dir}/keystore" || continue
+
+	port=$(cat "${dir}/port")
+
+	if ! geth init --datadir "${dir}" "${genesis}" > "${logfile}" 2>&1
+	then
+	    cat "${logfile}" >&2
+	    rm "${logfile}"
+	    false
+	fi
+
+	for address in "${dir}/keystore/UTC--"* ; do
+	    test -f "${address}"
+	    address="${address##*--}"
+	    break
+	done
+
+	geth --datadir "${dir}" --nodiscover --allow-insecure-unlock \
+	     --unlock "${address}" --password "${dir}/password.txt" \
+	     > "${logfile}" 2>&1 &
+	pid=$!
+
+	while [ ! -e "${dir}/geth.ipc" ] ; do
+	    sleep 0.1
+	done
+
+	geth attach "${dir}/geth.ipc" --exec 'admin.nodeInfo.enode' \
+	    | sed -r 's/@.*\?/@0.0.0.0:'${port}'?/' \
+	    >> "${static}"
+
+	kill ${pid}
+    done
+}
+
+finalize() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing static operand"
+    elif [ $# -gt 1 ] ; then
+	fatal "unexpected operand '$2'"
+    fi
+
+    local static="$1" ; shift
+    local dir
+
+    for dir in "${deploy_root}/"* ; do
+	test -d "${dir}" || continue
+	test -d "${dir}/keystore" || continue
+
+	cp "${static}" "${dir}/static-nodes.json"
+    done
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'prepare')
+	prepare "$@"
+	;;
+    'generate')
+	generate "$@"
+	;;
+    'setup')
+	setup "$@"
+	;;
+    'finalize')
+	finalize "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac
