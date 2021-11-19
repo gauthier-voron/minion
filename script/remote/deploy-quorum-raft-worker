@@ -139,7 +139,13 @@ generate_nodes() {
 	    dir="${netroot}/n${index}"
 
 	    mkdir "${dir}"
-	    geth --datadir "${dir}" init "${genesis}"
+	    if ! geth --datadir "${dir}" init "${genesis}" \
+		 > "${dir}/geth.log" 2>&1
+	    then
+		cat "${dir}/geth.log" >&2
+		rm "${dir}/geth.log"
+	    fi
+	    rm "${dir}/geth.log"
 	    echo "${port}" > "${dir}/port"
 	    echo "${raftport}" > "${dir}/raftport"
 	    echo "${wsport}" > "${dir}/wsport"
