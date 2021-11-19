@@ -1,4 +1,4 @@
-package deploy_algorand;
+package deploy_quorum_raft;
 
 use strict;
 use warnings;
@@ -191,14 +191,14 @@ sub dispatch
     }
 }
 
-# Deploy a Quorum IBFT blockchain over the workers listed in $ROLES_PATH which
+# Deploy a Quorum Raft blockchain over the workers listed in $ROLES_PATH which
 # are in the given $FLEET.
 #
-sub deploy_quorum_ibft
+sub deploy_quorum_raft
 {
     my ($nodes, @workers, $genworker, $proc);
 
-    # No node with Quorum IBFT behavior.
+    # No node with Quorum Raft behavior.
     # We exit with success.
     #
     if (!(-f $ROLES_PATH)) {
@@ -223,7 +223,7 @@ sub deploy_quorum_ibft
 	die ("failed to prepare quorum-raft workers");
     }
 
-    # Generate network for Quorum IBFT
+    # Generate network for Quorum Raft
 
     $genworker = $workers[0];
 
@@ -261,5 +261,5 @@ sub deploy_quorum_ibft
 }
 
 
-deploy_quorum_ibft();
+deploy_quorum_raft();
 __END__

@@ -1,4 +1,4 @@
-package deploy_algorand;
+package deploy_quorum_ibft;
 
 use strict;
 use warnings;
