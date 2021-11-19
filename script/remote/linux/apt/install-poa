@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+#   install-poa - install the Ethereum POA blockchain from its repository
+#
+
+set -e
+
+geth_url='https://github.com/ethereum/go-ethereum'
+geth_checkout='master'
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+# Install common utilities as well as golang 1.14.
+# This specific version of golang is required by Algorand.
+# We install it along the standard golang version and add it to the PATH when
+# building Algorand.
+#
+sudo -n apt-get install -yy 'git' 'golang-1.14' 'make'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Clone Algorand from the official repository and build it.
+#
+git clone "${geth_url}" 'install/poa'
+(
+    cd 'install/poa'
+
+    git checkout "${geth_checkout}"
+
+
+    export PATH="/usr/lib/go-1.14/bin:${PATH}"
+
+    # Avoid modification outside of this repository.
+    # This is important because some other installed software could use
+    # different versions of Go.
+    #
+    export GOPATH="${PWD}/go"
+
+    make all
+)
