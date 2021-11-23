@@ -13,6 +13,7 @@ set -e
 
 script_name='diablo-worker'
 install_root="${HOME}/install/diablo"
+solidity_root="${HOME}/install/solidity"
 deploy_root="${HOME}/deploy/diablo"
 
 
@@ -45,6 +46,10 @@ setup_environment() {
 
     if ! command -v 'diablo' > '/dev/null' 2> '/dev/null' ; then
 	fatal "cannot find diablo executable in '${install_root}'"
+    fi
+
+    if [ -d "${solidity_root}" ] ; then
+	export PATH="${solidity_root}/build/solc/:${PATH}"
     fi
 }
 
