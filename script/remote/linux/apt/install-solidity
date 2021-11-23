@@ -1,0 +1,46 @@
+#!/bin/bash
+#
+#   install-solidity - install the Solidity compiler from its repository
+#
+
+set -e
+
+# For now, the solidity compilers at v0.8.0 and above seem to produce an ABI
+# cincompatible with geth used in installed blockchain.
+# Should revert to 'develop' once it is fixed.
+#
+solidity_url='https://github.com/ethereum/solidity.git'
+# solidity_checkout='develop'
+solidity_checkout='v0.7.6'
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+# Install common utilities.
+#
+sudo -n apt-get install -yy 'cmake' 'gcc' 'git' 'libboost-all-dev' 'make'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Clone Solidity from the official repository and build it.
+#
+git clone --recursive "${solidity_url}" 'install/solidity'
+(
+    cd 'install/solidity'
+
+    git checkout "${solidity_checkout}"
+
+    mkdir 'build'
+
+    cd 'build'
+
+    cmake .. -DUSE_Z3=OFF -DUSE_CVC4=OFF
+
+    make -j$(cat '/proc/cpuinfo' | grep '^processor' | wc -l)
+)
