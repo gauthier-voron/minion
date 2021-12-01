@@ -116,6 +116,7 @@ sub resize
 
 	$volume = Minion::Aws::Cli->describe_volumes(
 	    FILTERS => { 'attachment.instance-id' => $self->id() },
+	    REGION => $self->region(),
 	    QUERY => 'Volumes[0].Attachments[0].VolumeId',
 	    %copts
 	    )->get();
@@ -124,7 +125,12 @@ sub resize
 	    exit (1);
 	}
 
-	$cli = Minion::Aws::Cli->modify_volume($volume, SIZE => $size, %copts);
+	$cli = Minion::Aws::Cli->modify_volume(
+	    $volume,
+	    REGION => $self->region(),
+	    SIZE => $size,
+	    %copts
+	    );
 	if ($cli->wait() != 0) {
 	    exit ($cli->exitstatus());
 	}
@@ -134,6 +140,7 @@ sub resize
 	while ($mstate eq 'modifying') {
 	    $mstate = Minion::Aws::Cli->describe_volumes_modifications(
 		IDS => [ $volume ],
+		REGION => $self->region(),
 		QUERY => 'VolumesModifications[0].ModificationState',
 		%copts
 		)->get();

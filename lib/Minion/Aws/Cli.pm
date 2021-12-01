@@ -730,6 +730,12 @@ sub describe_volumes
 	delete($opts{QUERY});
     }
 
+    if (defined($value = $opts{REGION})) {
+	confess() if ($value !~ /^\S+$/);
+	push(@command, '--region', $value);
+	delete($opts{REGION});
+    }
+
     confess(join(' ', keys(%opts))) if (%opts);
 
     $logger->(__format_cmd(\@command));
@@ -778,6 +784,12 @@ sub describe_volumes_modifications
 	delete($opts{QUERY});
     }
 
+    if (defined($value = $opts{REGION})) {
+	confess() if ($value !~ /^\S+$/);
+	push(@command, '--region', $value);
+	delete($opts{REGION});
+    }
+
     confess(join(' ', keys(%opts))) if (%opts);
 
     $logger->(__format_cmd(\@command));
@@ -806,6 +818,12 @@ sub modify_volume
     if (defined($value = $opts{LOG})) {
 	$logger = output_function($value);
 	delete($opts{LOG});
+    }
+
+    if (defined($value = $opts{REGION})) {
+	confess() if ($value !~ /^\S+$/);
+	push(@command, '--region', $value);
+	delete($opts{REGION});
     }
 
     if (defined($value = $opts{SIZE})) {
