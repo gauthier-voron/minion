@@ -401,7 +401,7 @@ sub boot
     }
 
     $log = '';
-    if ($runner->run($fleet, [ 'solidity' ], %copts)->wait() != 0) {
+    if ($runner->run($fleet, [ 'install-solidity' ], %copts)->wait() != 0) {
 	$fleet->cancel()->get();
 	printf(STDERR "%s", $log);
 	fatal("cannot install solidity");
