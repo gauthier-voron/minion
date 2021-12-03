@@ -5,7 +5,7 @@
 
 set -e
 
-diablo_path="$1" ; shift
+diablo_path="$1"
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
@@ -25,7 +25,21 @@ if [ ! -e 'install' ] ; then
     mkdir 'install'
 fi
 
-rsync -aAHX "${diablo_path}/" 'install/diablo/' > '/dev/null' 2> '/dev/null'
+# If no source path is specified, install dependencies only.
+#
+if [ "x${diablo_path}" = 'x' ] ; then
+    exit 0
+fi
+
+# Synch from sources (brought here by install-diablo-dev.pm).
+#
+if ! rsync -aAHX --delete --exclude='/go/pkg' "${diablo_path}/" \
+     'install/diablo/' > '/dev/null' 2> '/dev/null'
+then
+    echo "Cannot rsync from sources '${diablo_path}'"
+    exit 1
+fi
+
 (
     cd 'install/diablo'
 
