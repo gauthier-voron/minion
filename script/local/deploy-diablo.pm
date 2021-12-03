@@ -32,12 +32,15 @@ my $DEPLOY = 'deploy/diablo';
 my $CHAIN_LOC = $DEPLOY . '/chain.yaml';
 my $WORKLOAD_LOC = $DEPLOY . '/workload.yaml';
 my $KEYS_LOC = $DEPLOY . '/keys.json';
+my $ACCOUNTS_LOC = $DEPLOY . '/accounts.yaml';
 
 
 my $ALGORAND_CHAINCONFIG_PATH = $SHARED . '/algorand-chain.yml';
 my $POA_CHAIN_PATH = $SHARED . '/poa/chain.yaml';
 my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
 my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
+my $SOLANA_CHAIN_PATH = $SHARED . '/solana/chain.yaml';
+my $SOLANA_ACCOUNTS_PATH = $SHARED . '/solana/accounts.yaml';
 
 
 # Extract from the given $path the Quorum nodes.
@@ -74,7 +77,7 @@ sub get_nodes
 		if ($worker->can('public_ip')) {
 		    $assigned = $worker->public_ip();
 		} elsif ($worker->can('host')) {
-		    $assigned = $worker->host_ip();
+		    $assigned = $worker->host();
 		}
 
 		if ($assigned eq $ip) {
@@ -127,20 +130,20 @@ sub get_nodes
 }
 
 
-sub deploy_diablo_chain
+sub deploy_diablo_file
 {
-    my ($nodes, $primary, $secondaries, $chain) = @_;
+    my ($nodes, $primary, $secondaries, $file, $file_loc) = @_;
     my ($worker, @procs, $proc, @stats);
 
     foreach $worker (map { $_->{'worker'} } values(%$nodes)) {
-	$proc = $worker->send([ $chain ], TARGET => $CHAIN_LOC);
+	$proc = $worker->send([ $file ], TARGET => $file_loc);
 	push(@procs, $proc);
     }
 
     @stats = Minion::System::Pgroup->new(\@procs)->waitall();
 
     if (grep { $_->exitstatus() != 0 } @stats) {
-	die ("cannot send algorand chain configuration on workers");
+	die ("cannot send algorand file on workers");
     }
 
     return 1;
@@ -148,22 +151,27 @@ sub deploy_diablo_chain
 
 sub deploy_diablo_algorand
 {
-    return deploy_diablo_chain(@_, $ALGORAND_CHAINCONFIG_PATH);
+    return deploy_diablo_file(@_, $ALGORAND_CHAINCONFIG_PATH, $CHAIN_LOC);
 }
 
 sub deploy_diablo_poa
 {
-    return deploy_diablo_chain(@_, $POA_CHAIN_PATH);
+    return deploy_diablo_file(@_, $POA_CHAIN_PATH, $CHAIN_LOC);
 }
 
 sub deploy_diablo_quorum_ibft
 {
-    return deploy_diablo_chain(@_, $QUORUMIBFT_CHAIN_PATH);
+    return deploy_diablo_file(@_, $QUORUMIBFT_CHAIN_PATH, $CHAIN_LOC);
 }
 
 sub deploy_diablo_quorum_raft
 {
-    return deploy_diablo_chain(@_, $QUORUMRAFT_CHAIN_PATH);
+    return deploy_diablo_file(@_, $QUORUMRAFT_CHAIN_PATH, $CHAIN_LOC);
+}
+
+sub deploy_diablo_solana
+{
+    return deploy_diablo_file(@_, $SOLANA_CHAIN_PATH, $CHAIN_LOC) && deploy_diablo_file(@_, $SOLANA_ACCOUNTS_PATH, $ACCOUNTS_LOC);
 }
 
 
@@ -275,6 +283,10 @@ sub deploy_diablo
 
     if (-f $QUORUMRAFT_CHAIN_PATH) {
 	return deploy_diablo_quorum_raft($nodes, $primary, \@secondaries);
+    }
+
+	if (-f $SOLANA_CHAIN_PATH && -f $SOLANA_ACCOUNTS_PATH) {
+	return deploy_diablo_solana($nodes, $primary, \@secondaries);
     }
 
 

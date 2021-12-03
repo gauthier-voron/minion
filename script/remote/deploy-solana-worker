@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_name='deploy-solana-worker'
+install_root="${HOME}/install/solana"
+deploy_root="${HOME}/deploy/solana"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 prepare                                                (1)"
+    echo "       $0 generate <nodefile> <numkeys>                          (2)"
+    echo
+    echo "Prepare the Solana running directory in (1) or use the Solana"
+    echo "toolchain to generate a network from a list of nodes <nodefile> and"
+    echo "number of the accounts (which will be rounded up to the next multiple"
+    echo "of 2) to add with an initial balance in the blockchain."
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find solana install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/bin:${PATH}"
+
+    if ! command -v 'solana-bench-exchange' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find solana-bench-exchange executable in '${install_root}'"
+    fi
+}
+
+
+# Prepare action  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    if [ -e "${deploy_root}" ] ; then
+	rm -rf "${deploy_root}"
+    fi
+
+    if [ ! -d "${deploy_root}" ] ; then
+	mkdir -p "${deploy_root}"
+    fi
+}
+
+
+# Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+generate_accounts() {
+    local numkeys="$1" ; shift
+    local path batchsize
+
+
+    path="$deploy_root/accounts.yaml"
+    batchsize=$(( numkeys + 1 ))
+    batchsize=$(( batchsize / 2 ))
+
+    solana-bench-exchange --write-client-keys "$path" --fund-amount 500000000000 --account-groups 1 --batch-size "$batchsize"
+    sed -i '1d' "$path"
+    echo "" >> "$path"
+}
+
+generate_nodes() {
+    local netroot="$1" ; shift
+    local nodefile="$1" ; shift
+    local line addr rpcport gossipport dynamicport index dir configdir
+
+	index=0
+
+    while read line ; do
+	    addr="$(echo "${line}" | cut -d':' -f1)"
+	    rpcport="$(echo "${line}" | cut -d':' -f2)"
+	    gossipport="$(echo "${line}" | cut -d':' -f3)"
+        dynamicport="$(echo "${line}" | cut -d':' -f4)"
+
+	    dir="${netroot}/n${index}"
+        configdir="${dir}/config"
+
+	    mkdir -p "${configdir}"
+        cp -r "${install_root}"/{fetch-perf-libs.sh,fetch-spl.sh,scripts,net,multinode-demo} "${dir}"
+	    echo "${addr}" > "${configdir}/addr"
+	    echo "${rpcport}" > "${configdir}/rpcport"
+	    echo "${gossipport}" > "${configdir}/gossipport"
+	    echo "${dynamicport}" > "${configdir}/dynamicport"
+
+        solana-keygen new --no-passphrase -so "${configdir}/identity.json"
+        solana-keygen new --no-passphrase -so "${configdir}/vote-account.json"
+        solana-keygen new --no-passphrase -so "${configdir}/stake-account.json"
+
+	    index=$(( index + 1 ))
+	done < "${nodefile}"
+}
+
+generate_genesis() {
+    local netroot="$1" ; shift
+    local nodefile="$1" ; shift
+    local nodenum dir configdir args path
+
+    nodenum=$(cat "${nodefile}" | wc -l)
+    dir="${netroot}/n0"
+    configdir="${dir}/config"
+    args=(--primordial-accounts-file "$deploy_root/accounts.yaml")
+
+    for i in $(seq 2 ${nodenum}) ; do
+	path="${netroot}/n$(( i - 1 ))/config"
+    args+=(--bootstrap-validator "${path}/identity.json"
+                                 "${path}/vote-account.json"
+                                 "${path}/stake-account.json"
+    )
+    done
+
+    (
+        cd "$dir"
+        export BOOTSTRAP_VALIDATOR_IDENTITY_KEYPAIR="${configdir}/identity.json"
+        export BOOTSTRAP_VALIDATOR_STAKE_KEYPAIR="${configdir}/stake-account.json"
+        export BOOTSTRAP_VALIDATOR_VOTE_KEYPAIR="${configdir}/vote-account.json"
+        multinode-demo/setup.sh "${args[@]}"
+    )
+
+    solana-ledger-tool -l "$configdir"/bootstrap-validator create-snapshot 0 "$configdir"/bootstrap-validator --warp-slot 1
+    solana-ledger-tool -l "$configdir"/bootstrap-validator shred-version --max-genesis-archive-unpacked-size 1073741824 | tee "$configdir"/shred-version
+    solana-ledger-tool -l "$configdir"/bootstrap-validator bank-hash | tee "$configdir"/bank-hash
+
+    for i in $(seq 2 ${nodenum}) ; do
+	path="${netroot}/n$(( i - 1 ))/config"
+    cp "$configdir"/{faucet.json,shred-version,bank-hash} "$path"
+    cp "$configdir"/addr "$path/bootstrapaddr"
+    cp "$configdir"/gossipport "$path/bootstrapgossipport"
+    done
+}
+
+generate() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing nodefile operand"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing numkeys operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
+    fi
+
+    local nodefile="$1" ; shift
+    local numkeys="$1" ; shift
+    local netroot="${deploy_root}/network"
+
+    setup_environment
+
+    generate_accounts "${numkeys}"
+
+    generate_nodes "${netroot}" "${nodefile}"
+
+    generate_genesis "${netroot}" "${nodefile}"
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'prepare')
+	prepare "$@"
+	;;
+    'generate')
+	generate "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac

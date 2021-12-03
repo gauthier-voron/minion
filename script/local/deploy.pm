@@ -34,6 +34,10 @@ if ($RUNNER->run($FLEET, [ 'deploy-quorum-raft' ])->wait() != 0) {
     die ("failed to deploy quorum-raft");
 }
 
+if ($RUNNER->run($FLEET, [ 'deploy-solana' ])->wait() != 0) {
+    die ("failed to deploy solana");
+}
+
 # Deploy diablo at the very end as it might need some configuration generated
 # by the deployment of other blockchains.
 #

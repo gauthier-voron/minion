@@ -1,0 +1,72 @@
+#!/bin/bash
+#
+#   install-solang - install the Solang compiler from its repository
+#
+
+set -e
+
+llvm_url='https://github.com/solana-labs/llvm-project.git'
+llvm_checkout='solana-rustc/13.0-2021-08-08'
+
+solang_url='https://github.com/hyperledger-labs/solang.git'
+solang_checkout='v0.1.9'
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+# Install common utilities.
+#
+sudo -n apt-get install -yy 'cmake' 'gcc' 'g++' 'git' 'ninja-build' 'make' 'cargo'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+arch=$(uname -m)
+if [[ $arch = x86_64 ]]; then
+    mkdir -p 'install/solang/target/release'
+
+    curl -L "https://github.com/hyperledger-labs/solang/releases/download/${solang_checkout}/solang-linux" -o 'install/solang/target/release/solang'
+
+    chmod +x 'install/solang/target/release/solang'
+
+    exit 0
+fi
+
+# Clone Solang and LLVM from the official repository and build LLVM.
+#
+git clone "${solang_url}" 'install/solang'
+git clone "${llvm_url}" 'install/solang/llvm-project'
+(
+    cd 'install/solang/llvm-project'
+
+    git checkout "${llvm_checkout}"
+
+    mkdir 'build'
+
+    cd 'build'
+
+    cmake -G Ninja -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_ENABLE_TERMINFO=Off \
+        -DLLVM_ENABLE_LIBXML2=Off -DLLVM_ENABLE_ZLIB=Off \
+        -DLLVM_ENABLE_PROJECTS='clang;lld' \
+        -DLLVM_TARGETS_TO_BUILD='WebAssembly;BPF' \
+        -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_INSTALL_PREFIX=../llvm13.0 llvm
+
+    cmake --build . --target install
+)
+
+# Build Solang.
+#
+(
+    export PATH="$PATH:$PWD/install/solang/llvm13.0/bin"
+
+    cd 'install/solang'
+
+    git checkout "${solang_checkout}"
+
+    cargo build --release
+)
