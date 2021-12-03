@@ -170,7 +170,8 @@ sub dispatch
     foreach $ip (sort { $a cmp $b } keys(%$nodes)) {
 	$worker = $nodes->{$ip}->{'worker'};
 	$number = $nodes->{$ip}->{'number'};
-	@paths = ();
+
+	@paths = ($network.'/genesis.json', $network.'/static-nodes.json');
 
 	for ($i = 0; $i < $number; $i++) {
 	    push(@paths, $network . '/n' . $index);
@@ -248,6 +249,14 @@ sub deploy_quorum_ibft
     build_chainfile($CHAIN_PATH, $nodes);
 
     dispatch($nodes, $NETWORK_PATH);
+
+    $proc = $RUNNER->run(
+	\@workers,
+	[ 'deploy-quorum-ibft-worker', 'finalize' ]
+	);
+    if ($proc->wait() != 0) {
+	die ("failed to finalize quorum-ibft testnet");
+    }
 
     $genworker->execute(
 	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC ]

@@ -132,8 +132,6 @@ initialize_accounts() {
 
 initialize_nodes() {
     local netroot="$1" ; shift
-    local staticnodes="$1" ; shift
-    local genesis="$1" ; shift
     local nodefile="$1" ; shift
     local i num node port rpcport
 
@@ -144,19 +142,8 @@ initialize_nodes() {
 	port="$(echo "${node}" | cut -d':' -f2)"
 	rpcport="$(echo "${node}" | cut -d':' -f3)"
 
-	cp "${staticnodes}" "${netroot}/n${i}/static-nodes.json"
-
 	cp "${netroot}/${i}/nodekey" "${netroot}/n${i}/nodekey"
 	chmod 644 "${netroot}/n${i}/nodekey"
-
-	if ! geth --datadir "${netroot}/n${i}" init "${genesis}" \
-	     > "${netroot}/n${i}/geth.log" 2>&1 ; then
-	    cat "${netroot}/n${i}/geth.log" >&2
-	    rm "${netroot}/n${i}/geth.log"
-	    return 1
-	fi
-
-	rm "${netroot}/n${i}/geth.log"
 
 	rm -rf "${netroot}/${i}"
 
@@ -202,11 +189,39 @@ generate() {
 
     initialize_accounts "${netroot}/genesis.json" "${keyfile}"
 
-    initialize_nodes "${netroot}" "${netroot}/static-nodes.json" \
-		     "${netroot}/genesis.json" "${nodefile}"
+    initialize_nodes "${netroot}" "${nodefile}"
+}
 
-    rm "${netroot}/static-nodes.json"
-    rm "${netroot}/genesis.json"
+finalize() {
+    local genesis="${deploy_root}/genesis.json"
+    local staticnodes="${deploy_root}/static-nodes.json"
+    local dir
+
+    setup_environment
+
+    if [ -d "${deploy_root}/network" ] ; then
+	rm -rf "${deploy_root}/network"
+    fi
+
+    for dir in "${deploy_root}/n"* ; do
+	if [ ! -d "${dir}" ] ; then
+	    continue
+	fi
+
+	cp "${staticnodes}" "${dir}/static-nodes.json"
+
+	if ! geth --datadir "${dir}" init "${genesis}" \
+	     > "${dir}/geth.log" 2>&1 ; then
+	    cat "${dir}/geth.log" >&2
+	    rm "${dir}/geth.log"
+	    return 1
+	fi
+
+	rm "${dir}/geth.log"
+    done
+
+    rm "${genesis}"
+    rm "${staticnodes}"
 }
 
 
@@ -224,6 +239,9 @@ case "${action}" in
 	;;
     'generate')
 	generate "$@"
+	;;
+    'finalize')
+	finalize "$@"
 	;;
     *)
 	fatal "unknown action: '${action}'"
