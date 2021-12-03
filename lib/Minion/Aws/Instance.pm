@@ -89,6 +89,38 @@ sub _init
 }
 
 
+sub snapshot
+{
+    my ($self, $name, %opts) = @_;
+    my (%copts, $value, $cli);
+
+    confess() if (!defined($name));
+
+    if (defined($value = $opts{DESCRIPTION})) {
+	$copts{DESCRIPTION} = $value;
+	delete($opts{DESCRIPTION});
+    }
+
+    confess(join(' ', keys(%opts))) if (%opts);
+
+    if (defined($value = $self->{__PACKAGE__()}->{_err})) {
+	$copts{ERR} = $value;
+    }
+
+    if (defined($value = $self->{__PACKAGE__()}->{_log})) {
+	$copts{LOG} = $value;
+    }
+
+    $cli = Minion::Aws::Cli->create_image($self->id(), $name, %copts);
+
+    return Minion::System::WrapperFuture->new($cli, MAPOUT => sub {
+	my ($reply) = @_;
+	my $id = $reply->{'ImageId'};
+
+	return Minion::Aws::Image->new($id, REGION => $self->region());
+    });
+}
+
 sub resize
 {
     my ($self, $size, @err) = @_;
