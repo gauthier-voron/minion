@@ -99,82 +99,12 @@ prepare() {
 
 # Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-generate_genesis() {
-    local genesis="$1" ; shift
-    local netroot="$1" ; shift
-    local tmp account address
-
-    tmp="$(mktemp -d --suffix='.d')"
-
-    # Make sure that there is no cached puppet configuration.
-    #
-    rm -rf "${HOME}/.puppeth"
-
-    # Create a new genesis block using puppeth.
-    #
-    (
-	set -e
-
-	echo 'private'   # network name
-	echo '2'         # configure new genesis
-	echo '1'         # create from scratch
-	echo '2'         # use clique consensus
-	echo ''          # use default block frequency
-
-	# Iterate over all accounts specified in the netroot and register their
-	# address as sealer nodes.
-	#
-	for dir in "${netroot}/"* ; do
-	    test -d "${dir}"
-	    test -d "${dir}/keystore"
-
-	    for address in "${dir}/keystore/UTC--"* ; do
-		test -f "${address}"
-		echo "${address##*--}"
-		break
-	    done
-	done
-	echo ''          # finish by empty line
-
-	# Pre-fund all accounts in keyfile.
-	# Note that sealers accounts are not funded.
-	#
-	while read account ; do
-	    address="$(echo "${account}" | cut -d':' -f1)"
-	    echo "${address}"
-	done < "${keyfile}"
-	echo ''          # finish by empty line
-
-	echo 'yes'       # pre-fund precompile-addresses
-	echo '10'        # set network id to 10
-
-	echo '2'         # manage existing genesis
-	echo '2'         # export genesis configuration
-	echo "${tmp}"    # export in temp directory
-    ) | puppeth > '/dev/null' || true
-    test -f "${tmp}/private.json"
-
-    # Rename new genesis file to expected name.
-    #
-    mv "${tmp}/private.json" "${genesis}"
-
-    # Delete temp directory.
-    #
-    rm -rf "${tmp}"
-
-    # Clean cached puppet configuration.
-    #
-    rm -rf "${HOME}/.puppeth"
-}
-
 setup_nodes() {
     local netroot="$1" ; shift
     local genesis="$1" ; shift
     local logfile="$(mktemp --suffix='.log')"
     local passfile="$(mktemp --suffix='.txt')"
     local dir address pid
-
-    set -x
 
     for dir in "${netroot}/"* ; do
 	test -d "${dir}"
