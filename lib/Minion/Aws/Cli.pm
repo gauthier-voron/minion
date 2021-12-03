@@ -257,6 +257,53 @@ sub copy_image
     return $class->new(\@command, %copts);
 }
 
+sub create_image
+{
+    my ($class, $id, $name, %opts) = @_;
+    my (%copts, @command, $value, $logger);
+
+    confess() if (!defined($id));
+    confess() if ($id !~ /^i-[0-9a-f]+$/);
+    confess() if (!defined($name));
+    confess() if (ref($name) ne '');
+
+    $logger = sub {};
+
+    @command = (
+	__aws_base_command(), 'ec2', 'create-image',
+	'--instance-id', $id,
+	'--name', $name
+	);
+
+    if (defined($value = $opts{DESCRIPTION})) {
+	confess() if (ref($value) ne '');
+	push(@command, '--description', $value);
+	delete($opts{DESCRIPTION});
+    }
+
+    if (defined($value = $opts{ERR})) {
+	$copts{STDERR} = $value;
+	delete($opts{ERR});
+    }
+
+    if (defined($value = $opts{LOG})) {
+	$logger = output_function($value);
+	delete($opts{LOG});
+    }
+
+    if (defined($value = $opts{REGION})) {
+	confess() if ($value !~ /^\S+$/);
+	push(@command, '--region', $value);
+	delete($opts{REGION});
+    }
+
+    confess(join(' ', keys(%opts))) if (%opts);
+
+    $logger->(__format_cmd(\@command));
+
+    return $class->new(\@command, %copts);
+}
+
 sub delete_snapshot
 {
     my ($class, $id, %opts) = @_;
