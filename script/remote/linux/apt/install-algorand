@@ -5,8 +5,12 @@
 
 set -e
 
+# Master is currently broken (f*cking idiot...)
+# Restore to master as soon as it is stable again.
+#
 algorand_url='https://github.com/algorand/go-algorand.git'
-algorand_checkout='master'
+# algorand_checkout='master'
+algorand_checkout='116c06e00ad4f0dfa0c22577b733d8b0d933be0a'
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
