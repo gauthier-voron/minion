@@ -288,7 +288,10 @@ sub setup_nodes
 
     $statics = { map { $_ => $dest . '/' . $_ . '.txt' } @ips };
     if (grep { $_->exitstatus() != 0 }
-	$fleet->recv([ $output ], TARGETS => [values(%$statics)])->waitall()) {
+	$fleet->recv(
+	    [ $output ],
+	    TARGETS => [ map { $statics->{$_} } @ips ]
+	)->waitall()) {
 	die ('cannot receive static nodes from workers');
     }
 
