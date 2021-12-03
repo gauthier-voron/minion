@@ -201,7 +201,18 @@ sub resolve_remote
 sub _run_remote
 {
     my ($self, $fleet, $paths, $args, %opts) = @_;
-    my ($worker, $system, $path, @procs, $proc, @ws, @ews);
+    my ($worker, $system, $path, @procs, $proc, @ws, @ews, %popts, $opt, $val);
+
+    foreach $opt (qw(STDIN STDOUT STDERR)) {
+	if (defined($val = $opts{$opt . 'S'})) {
+	    if (ref($val) eq 'ARRAY') {
+		confess('not yet implemented');
+	    } else {
+		$popts{$opt} = $val;
+		delete($opts{$opt . 'S'});
+	    }
+	}
+    }
 
     return Minion::System::Process->new(sub {
 	foreach $worker ($fleet->members()) {
@@ -216,7 +227,7 @@ sub _run_remote
 	    exit (1);
 	}
 
-	@ews = $fleet->execute(['./.minion-task', @$args], %opts)->waitall();
+	@ews = $fleet->execute(['./.minion-task', @$args])->waitall();
 
 	@ws = $fleet->execute(['rm', '.minion-task'])->waitall();
 	if (grep { $_->exitstatus() != 0 } @ws) {
@@ -226,7 +237,7 @@ sub _run_remote
 	if (grep { $_->exitstatus() != 0 } @ews) {
 	    exit (1);
 	}
-    });
+    }, %opts);
 }
 
 sub _run_detect_systems
@@ -354,7 +365,7 @@ sub run
 
     foreach $opt (qw(STDINS STDOUTS STDERRS)) {
 	if (defined($value = $opts{$opt})) {
-	    $ropts{$opt} = $value;
+	    $ropts{substr($opt, 0, -1)} = $value;
 	    delete($opts{$opt});
 	}
     }
