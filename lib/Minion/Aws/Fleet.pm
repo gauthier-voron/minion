@@ -317,7 +317,7 @@ sub instances
     }
 
     my $ret = Minion::System::ProcessFuture->new(sub {
-	my ($ids, $desc, $idesc, $field);
+	my ($ids, $desc, $rdesc, $idesc, $field);
 
 	if (defined($log)) {
 	    $copts{LOG} = $log;
@@ -338,7 +338,7 @@ sub instances
 
 	my $tmp = Minion::Aws::Cli->describe_instances(
 	    IDS    => [ @$ids ],
-	    QUERY  => 'Reservations[0].Instances[*].[' .
+	    QUERY  => 'Reservations[*].Instances[*].[' .
 	              'InstanceId,' .
 	              'PublicIpAddress,' .
 	              'PrivateIpAddress' .
@@ -352,10 +352,12 @@ sub instances
 	    exit (1);
 	}
 
-	foreach $idesc (@$desc) {
-	    next if (grep { !defined($_) || ($_ eq '') } @$idesc);
+	foreach $rdesc (@$desc) {
+	    foreach $idesc (@$rdesc) {
+		next if (grep { !defined($_) || ($_ eq '') } @$idesc);
 	    
-	    printf("%s\n", join(':', @$idesc));
+		printf("%s\n", join(':', @$idesc));
+	    }
 	}
     }, MAPOUT => sub {
 	my ($reply) = @_;
