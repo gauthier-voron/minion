@@ -131,7 +131,7 @@ sub resize
 	    SIZE   => $size,
 	    %copts);
 	if ($cli->wait() != 0) {
-	    exit ($cli->exitstatus());
+	    exit ($cli->exitstatus() >> 8);
 	}
 
 	$mstate = 'modifying';
