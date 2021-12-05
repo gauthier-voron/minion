@@ -347,7 +347,7 @@ sub deploy_algorand
     }
 
     $proc = $genworker->recv(
-	[ 'deploy/algorand/' . $NETWORK_NAME,
+	[ 'deploy/algorand/' . $NETWORK_NAME . '.tar.gz',
 	  'deploy/algorand/' . $CHAINEXTRA_NAME
 	],
 	TARGET => $ENV{MINION_PRIVATE}
@@ -358,8 +358,8 @@ sub deploy_algorand
 
     $genworker->execute(
 	[ 'rm', '-rf',
-	  'deploy/algorand/network',
-	  'deploy/algorand/chain.yml',
+	  'deploy/algorand/' . $NETWORK_NAME . '.tar.gz',
+	  'deploy/algorand/' . $CHAINEXTRA_NAME,
 	  'deploy/algorand/' . $NETWORK_TEMPLATE_NAME,
 	  'deploy/algorand/' . $NODEFILE_NAME ]
 	)->wait();
@@ -368,6 +368,9 @@ sub deploy_algorand
     # Now this control node can dispatch the necessary information to every
     # nodes.
     #
+
+    system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
+	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
     build_chainconfig($CHAINCONFIG_PATH, $nodes, $CHAINEXTRA_PATH);
 

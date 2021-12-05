@@ -259,6 +259,8 @@ generate() {
     rm "${netroot}/network.json"  # only used by goal network
     rm "${netroot}/"*.rootkey     # already in associated node
     rm "${netroot}/"*.partkey     # already in associated node
+
+    tar -C "${deploy_root}" -czf "${netroot}.tar.gz" 'network'
 }
 
 
