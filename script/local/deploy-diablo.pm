@@ -32,7 +32,7 @@ my $DEPLOY = 'deploy/diablo';
 my $CHAIN_LOC = $DEPLOY . '/chain.yaml';
 my $WORKLOAD_LOC = $DEPLOY . '/workload.yaml';
 my $KEYS_LOC = $DEPLOY . '/keys.json';
-my $ACCOUNTS_LOC = $DEPLOY . '/accounts.yaml';
+my $ACCOUNTS_LOC = $DEPLOY . '/accounts.yaml.gz';
 
 
 my $ALGORAND_CHAINCONFIG_PATH = $SHARED . '/algorand-chain.yml';
@@ -40,7 +40,7 @@ my $POA_CHAIN_PATH = $SHARED . '/poa/chain.yaml';
 my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
 my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
 my $SOLANA_CHAIN_PATH = $SHARED . '/solana/chain.yaml';
-my $SOLANA_ACCOUNTS_PATH = $SHARED . '/solana/accounts.yaml';
+my $SOLANA_ACCOUNTS_PATH = $SHARED . '/solana/accounts.yaml.gz';
 
 
 # Extract from the given $path the Quorum nodes.
