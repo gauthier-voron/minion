@@ -68,7 +68,7 @@ generate_accounts() {
     batchsize=$(( numkeys + 1 ))
     batchsize=$(( batchsize / 2 ))
 
-    solana-bench-exchange --write-client-keys "$path" --fund-amount 500000000000 --account-groups 1 --batch-size "$batchsize"
+    solana-bench-exchange --write-client-keys "$path" --fund-amount 50000000000 --account-groups 1 --batch-size "$batchsize"
     sed -i '1d' "$path"
     echo "" >> "$path"
 }
@@ -162,6 +162,8 @@ generate() {
     generate_nodes "${netroot}" "${nodefile}"
 
     generate_genesis "${netroot}" "${nodefile}"
+
+    gzip "$deploy_root/accounts.yaml"
 }
 
 

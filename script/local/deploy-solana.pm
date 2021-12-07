@@ -26,7 +26,6 @@ my $DATA_DIR = $MINION_SHARED . '/solana';  # Where to store things across
 
 my $ROLES_PATH = $DATA_DIR . '/behaviors.txt';           # Behaviors of workers
 my $CHAIN_PATH = $DATA_DIR . '/chain.yaml';   # Diablo description of the chain
-my $ACCOUNTS_PATH = $DATA_DIR . '/accounts.yaml';
 
 
 my $DEPLOY_ROOT = 'deploy/solana';       # Where the files are deployed on
@@ -43,7 +42,7 @@ my $NODEFILE_LOC = $DEPLOY_ROOT . '/' . $NODEFILE_NAME;
 my $NETWORK_NAME = 'network';
 my $NETWORK_PATH = $MINION_PRIVATE . '/' . $NETWORK_NAME;
 my $NETWORK_LOC = $DEPLOY_ROOT . '/' . $NETWORK_NAME;
-my $ACCOUNTS_LOC = $DEPLOY_ROOT . '/accounts.yaml';
+my $ACCOUNTS_LOC = $DEPLOY_ROOT . '/accounts.yaml.gz';
 
 
 # Extract from the given $path the Quorum nodes.
@@ -154,7 +153,7 @@ sub build_chainfile
 	}
     }
 
-    printf($fh "extra:\n  - \"deploy/diablo/accounts.yaml\"\n"); # extra
+    printf($fh "extra:\n  - %d\n  - \"deploy/diablo/accounts.yaml.gz\"\n", 150000); # extra
 
     close($fh);
 }
@@ -232,7 +231,7 @@ sub deploy_solana
     $proc = $RUNNER->run(
 	$genworker,
 	[ 'deploy-solana-worker', 'generate', $NODEFILE_LOC ,
-	  2000 ]
+	  150000 ]
 	);
     if ($proc->wait() != 0) {
 	die ("failed to generate solana testnet");
