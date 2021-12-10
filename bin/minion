@@ -12,6 +12,7 @@ use IO::Select;
 use Minion::Aws;
 use Minion::Aws::Fleet;
 use Minion::Aws::Image;
+use Minion::Aws::Instance;
 use Minion::Run::Runner;
 use Minion::StaticFleet;
 
@@ -65,7 +66,6 @@ my @BOOT_INSTALLS = ();
 my @BOOT_REGIONS  = @PREPARE_REGIONS;
 
 
-my $RUN_SIZE = undef;
 my $RUN_SYNC = undef;
 my $RUN_USER = $BOOT_USER;
 my $RUN_RESULT = sub {
@@ -179,39 +179,43 @@ sub _run
     }
 
     foreach $region (keys(%$fids)) {
-	$fleet = Minion::Aws::Fleet->new(
-	    $fids->{$region},
-	    LOG    => \&cmdlog,
-	    REGION => $region,
-	    USER   => $params{USER}
-	    );
+	if ($fids->{$region} =~ /^sfr-/) {
+	    $fleet = Minion::Aws::Fleet->new(
+		$fids->{$region},
+		LOG    => \&cmdlog,
+		REGION => $region,
+		USER   => $params{USER}
+		);
 
-	if (defined($params{SIZE})) {
-	    if (scalar($fleet->members()) < $params{SIZE}) {
-		fatal("fleet '%s' in '%s' does not have %d instances " .
-		      "(only %d)", $fleet->id(), $region, $params{SIZE},
-		      scalar($fleet->members()));
-	    }
-
-	    $fleet = Minion::StaticFleet->new([
-		($fleet->members())[0 .. ($params{SIZE} - 1)]
-	    ]);
-
-	    message("using %d-subset of '%s' in '%s'", $params{SIZE},
-		    $fids->{$region}, $region);
-	} else {
-	    message("using '%s' in '%s'", $fids->{$region}, $region);
+	    $fleets{$region} = $fleet;
+	    next;
 	}
 
-	$fleets{$region} = $fleet;
+	if ($fids->{$region} =~ /^\d+\.\d+\.\d+\.\d+/) {
+	    $fleet = Minion::StaticFleet->new([
+		map {
+		    Minion::Aws::Instance->new(
+			'i-00000000000', $_, $_, 'sfr-00000000000',
+			LOG    => \&cmdlog,
+			REGION => $region,
+			USER   => $params{USER}
+			);
+		} split(',', $fids->{$region})
+	    ]);
+
+	    $fleets{$region} = $fleet;
+	    next;
+	}
     }
 
     $pgrp = Minion::System::Pgroup->new([]);
 
     foreach $region (keys(%fleets)) {
-	message("fetching '%s' in '%s'", $fids->{$region}, $region);
-	$proc = $fleets{$region}->instances();
-	$pgrp->add($proc);
+	if ($fleets{$region}->can('instances')) {
+	    message("fetching '%s' in '%s'", $fids->{$region}, $region);
+	    $proc = $fleets{$region}->instances();
+	    $pgrp->add($proc);
+	}
     }
 
     map { $_->get() } $pgrp->waitall();
@@ -531,7 +535,7 @@ sub _run
 sub run
 {
     my ($chain, $workload, @ids);
-    my (@breakpoints, @installs, $result, $size, $sync, $user);
+    my (@breakpoints, @installs, $result, $sync, $user);
     my ($id, %fids, $breakpoint);
 
     GetOptionsFromArray(
@@ -539,7 +543,6 @@ sub run
 	'b|breakpoint=s' => \@breakpoints,
 	'i|install=s'    => \@installs,
 	'r|result=s'     => \$result,
-	's|size=s'       => \$size,
 	'S|sync=s'       => \$sync,
 	'u|user=s'       => \$user,
 	'v|verbose'      => sub { $VERBOSE += 1; }
@@ -558,11 +561,17 @@ sub run
     }
 
     foreach $id (@ids) {
-	if ($id !~ /^(sfr(?:-[0-9a-f]+)+)@(..-[^-]+-\d+)$/) {
-	    fatal("invalid id operand: '%s'", $id);
+	if ($id =~ /^(sfr(?:-[0-9a-f]+)+)@(..-[^-]+-\d+)$/) {
+	    $fids{$2} = $1;
+	    next;
 	}
 
-	$fids{$2} = $1;
+	if ($id =~ /^(\d+\.\d+\.\d+\.\d+(?:,\d+\.\d+\.\d+\.\d+)*)@(..-[^-]+-\d+)$/) {
+	    $fids{$2} = $1;
+	    next;
+	}
+
+	fatal("invalid id operand: '%s'", $id);
     }
 
     if (scalar(@breakpoints) > 0) {
@@ -586,14 +595,6 @@ sub run
 	$result .= '/' . $RUN_RESULT->();
     }
 
-    if (!defined($size)) {
-	$size = $RUN_SIZE;
-    } elsif ($size !~ /^\d+$/) {
-	fatal("invalid value '%s' for option '--size'", $size);
-    } elsif ($size <= 1) {
-	fatal("too small value (%d) for option '--size'", $size);
-    }
-
     if (!defined($sync)) {
 	$sync = $RUN_SYNC;
     }
@@ -607,7 +608,6 @@ sub run
 	BREAKPOINTS => \@breakpoints,
 	INSTALLS    => \@installs,
 	RESULT      => $result,
-	SIZE        => $size,
 	SYNC        => $sync,
 	USER        => $user
 	);
@@ -663,7 +663,7 @@ sub _boot
 	    $params{TYPE},
 	    KEY      => $params{KEY},
 	    LOG      => \&cmdlog,
-	    PRICE    => 1.0,
+	    PRICE    => 2.0,
 	    REGION   => $region,
 	    SECGROUP => $secgroups->{$region},
 	    SIZE     => $params{SIZE},
