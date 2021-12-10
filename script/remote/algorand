@@ -117,7 +117,7 @@ fi
 action="$1" ; shift
 
 case "${action}" in
-    'die')
+    'kill')
 	die "$@"
 	;;
     'start')
