@@ -6,7 +6,7 @@
 set -e
 
 diablo_url='https://github.com/NatoliChris/diablo-benchmark.git'
-diablo_checkout='master'
+diablo_checkout='osdi22'
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
