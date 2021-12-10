@@ -26,20 +26,31 @@ my $PREPARE_DISK = 32;
 my $PREPARE_REGION = 'eu-central-1';
 my $PREPARE_KEY = 'default';
 my $PREPARE_NAME = 'minion-osdi22';
-my $PREPARE_SIZE = 50;
+my $PREPARE_SIZE = 10;
 my $PREPARE_SECGROUP = 'default';
-my $PREPARE_TYPE = 'c5.xlarge';
+my $PREPARE_TYPE = 'c5.9xlarge';
 my $PREPARE_USER = 'ubuntu';
 my @PREPARE_REGIONS = qw(
     af-south-1
+    ap-east-1
     ap-northeast-1
+    ap-northeast-2
+    ap-northeast-3
     ap-south-1
+    ap-southeast-1
     ap-southeast-2
+    ca-central-1
+    eu-central-1
     eu-north-1
     eu-south-1
+    eu-west-1
+    eu-west-2
+    eu-west-3
     me-south-1
     sa-east-1
+    us-east-1
     us-east-2
+    us-west-1
     us-west-2
 );
 my @PREPARE_ALLINSTALLS = (
