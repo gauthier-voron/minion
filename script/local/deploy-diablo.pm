@@ -3,7 +3,7 @@ package deploy_algorand;
 use strict;
 use warnings;
 
-# use File::Copy;
+use File::Temp qw(tempfile);
 
 use Minion::System::Pgroup;
 
@@ -127,13 +127,54 @@ sub get_nodes
 }
 
 
+sub grep_region_chain
+{
+    my ($chain, $worker) = @_;
+    my ($wregion, $member, @allowed, $rfh, $line, $ip, $wfh, $path);
+
+    $wregion = $worker->region();
+
+    foreach $member ($FLEET->members()) {
+	if ($member->region() ne $wregion) {
+	    next;
+	}
+	push(@allowed, $member->public_ip());
+    }
+
+    ($wfh, $path) = tempfile(DIR => $PRIVATE);
+
+    if (!open($rfh, '<', $chain)) {
+	die ("cannot grep '$chain'");
+    }
+
+    while (defined($line = <$rfh>)) {
+	chomp($line);
+
+	if ($line =~ /^  - (\d+\.\d+\.\d+\.\d+):\d+$/) {
+	    $ip = $1;
+
+	    if (!grep { $ip eq $_ } @allowed) {
+		next;
+	    }
+	}
+
+	printf($wfh "%s\n", $line);
+    }
+
+    close($rfh);
+    close($wfh);
+
+    return $path;
+}
+
 sub deploy_diablo_chain
 {
     my ($nodes, $primary, $secondaries, $chain) = @_;
-    my ($worker, @procs, $proc, @stats);
+    my ($worker, @procs, $proc, @stats, $tchain);
 
     foreach $worker (map { $_->{'worker'} } values(%$nodes)) {
-	$proc = $worker->send([ $chain ], TARGET => $CHAIN_LOC);
+	$tchain = grep_region_chain($chain, $worker);
+	$proc = $worker->send([ $tchain ], TARGET => $CHAIN_LOC);
 	push(@procs, $proc);
     }
 
