@@ -35,6 +35,7 @@ my $KEYS_LOC = $DEPLOY . '/keys.json';
 
 
 my $ALGORAND_CHAINCONFIG_PATH = $SHARED . '/algorand-chain.yml';
+my $LIBRA_CHAIN_PATH = $SHARED . '/libra/chain.yaml';
 my $POA_CHAIN_PATH = $SHARED . '/poa/chain.yaml';
 my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
 my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
@@ -174,7 +175,7 @@ sub deploy_diablo_chain
 
     foreach $worker (map { $_->{'worker'} } values(%$nodes)) {
 	$tchain = grep_region_chain($chain, $worker);
-	$proc = $worker->send([ $tchain ], TARGET => $CHAIN_LOC);
+	$proc = $worker->send([ $chain ], TARGET => $CHAIN_LOC);
 	push(@procs, $proc);
     }
 
@@ -190,6 +191,11 @@ sub deploy_diablo_chain
 sub deploy_diablo_algorand
 {
     return deploy_diablo_chain(@_, $ALGORAND_CHAINCONFIG_PATH);
+}
+
+sub deploy_diablo_libra
+{
+    return deploy_diablo_chain(@_, $LIBRA_CHAIN_PATH);
 }
 
 sub deploy_diablo_poa
@@ -304,6 +310,10 @@ sub deploy_diablo
 
     if (-f $ALGORAND_CHAINCONFIG_PATH) {
 	return deploy_diablo_algorand($nodes, $primary, \@secondaries);
+    }
+
+    if (-f $LIBRA_CHAIN_PATH) {
+	return deploy_diablo_libra($nodes, $primary, \@secondaries);
     }
 
     if (-f $POA_CHAIN_PATH) {
