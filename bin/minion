@@ -78,7 +78,7 @@ my $RUN_RESULT = sub {
 		   $year, $mon, $day, $hour, $min, $sec);
 };
 my @RUN_INSTALLS = ();
-my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa);
+my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa libra);
 my @RUN_BREAKPOINTS = qw(boot install sync deploy chain benchmark);
 
 
