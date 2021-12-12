@@ -59,6 +59,7 @@ my @PREPARE_ALLINSTALLS = (
 my @PREPARE_INSTALLS = (
     [ 'install-algorand' ],
     [ 'install-diablo'   ],
+    [ 'install-libra'    ],
     [ 'install-poa'      ],
     [ 'install-quorum'   ],
     [ 'install-solidity' ]
