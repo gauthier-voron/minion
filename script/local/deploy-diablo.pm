@@ -29,6 +29,7 @@ my $SPEC_WORKLOAD_PATH = $PRIVATE . '/workload.yaml';
 
 
 my $DEPLOY = 'deploy/diablo';
+my $CHAIN_PRIMARY_LOC = $DEPLOY . '/primary/chain.yaml';
 my $CHAIN_LOC = $DEPLOY . '/chain.yaml';
 my $WORKLOAD_LOC = $DEPLOY . '/workload.yaml';
 my $KEYS_LOC = $DEPLOY . '/keys.json';
@@ -171,12 +172,23 @@ sub grep_region_chain
 sub deploy_diablo_chain
 {
     my ($nodes, $primary, $secondaries, $chain) = @_;
-    my ($worker, @procs, $proc, @stats, $tchain);
+    my ($node, @procs, $proc, @stats, $tchain);
 
-    foreach $worker (map { $_->{'worker'} } values(%$nodes)) {
-	$tchain = grep_region_chain($chain, $worker);
-	$proc = $worker->send([ $chain ], TARGET => $CHAIN_LOC);
-	push(@procs, $proc);
+    foreach $node (values(%$nodes)) {
+	if ($node->{'primary'} > 0) {
+	    $proc = $node->{'worker'}->send(
+		[ $chain ],
+		TARGET => $CHAIN_PRIMARY_LOC);
+	    push(@procs, $proc);
+	}
+
+	if ($node->{'secondaries'} > 0) {
+	    $tchain = grep_region_chain($chain, $node->{'worker'});
+	    $proc = $node->{'worker'}->send(
+		[ $tchain ],
+		TARGET => $CHAIN_LOC);
+	    push(@procs, $proc);
+	}
     }
 
     @stats = Minion::System::Pgroup->new(\@procs)->waitall();
