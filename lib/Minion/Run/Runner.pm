@@ -145,7 +145,7 @@ sub _run_local
 
     $proc = Minion::System::Process->new(sub {
 	$dir = File::Temp->newdir
-	    ('minion.XXXXXX', SUFFIX => '.d', TMPDIR => 1);
+	    ('minion.XXXXXX', SUFFIX => '.d');
 
 	$_ = $fleet;
 	@_ = (
