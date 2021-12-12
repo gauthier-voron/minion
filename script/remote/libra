@@ -1,0 +1,143 @@
+#!/bin/bash
+
+set -e
+
+script_name='poa'
+install_root="${HOME}/install/libra"
+deploy_root="${HOME}/deploy/libra"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 start (1)"
+    echo "       $0 stop (2)"
+    echo "       $0 kill (3)"
+    echo
+    echo "Either start (1), gracefully stop (2) or kill (3) the nodes deployed"
+    echo "on this worker"
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find libra install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/target/release:${PATH}"
+
+    if ! command -v 'diem-node' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find diem-node executable in '${install_root}'"
+    fi
+}
+
+
+# Actions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+start() {
+    local dir pid port wsport address
+
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    ulimit -n 65535
+
+    export PRIVATE_CONFIG=ignore
+
+    for dir in "${deploy_root}/"* ; do
+	if [ -d "${dir}" ] ; then
+	    diem-node --config "${dir}/node.yaml" \
+		      > "${dir}/out" 2> "${dir}/err" &
+	    pid=$!
+
+	    echo ${pid} > "${dir}/pid"
+	fi
+    done
+
+    sleep 2
+}
+
+_kill() {
+    local sig="$1" ; shift
+    local dir pid dead
+
+    for dir in "${deploy_root}/"* ; do
+	if [ ! -d "${dir}" ] ; then
+	    continue
+	elif [ ! -f "${dir}/pid" ] ; then
+	    continue
+	fi
+
+	pid="$(cat "${dir}/pid")"
+
+	if echo "${pid}" | grep -Pq '^\d+$' ; then
+	    kill "${sig}" ${pid} 2> '/dev/null' || true
+	fi
+
+	dead=0
+	for i in $(seq 1 5) ; do
+	    if ! ps ${pid} > '/dev/null' ; then
+		dead=1
+		break
+	    fi
+
+	    sleep 1
+	done
+
+	if [ ${dead} -eq 0 ] ; then
+	    kill -KILL ${pid} 2> '/dev/null' || true
+	fi
+
+	rm "${dir}/pid"
+    done
+}
+
+stop() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    _kill -INT
+}
+
+nkill() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    _kill -KILL
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+setup_environment
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'kill')
+	nkill "$@"
+	;;
+    'start')
+	start "$@"
+	;;
+    'stop')
+	stop "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac

@@ -1,0 +1,119 @@
+#!/bin/bash
+
+set -e
+
+script_name='deploy-libra-worker'
+install_root="${HOME}/install/libra"
+deploy_root="${HOME}/deploy/libra"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 prepare <nodes...>                                     (1)"
+    echo "       $0 generate <nodefile> <keyfile>                          (2)"
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find libra install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/target/release:${PATH}"
+
+    if ! command -v 'diem-swarm' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find diem-swarm executable in '${install_root}'"
+    fi
+
+    if ! command -v 'diem-node' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find diem-node executable in '${install_root}'"
+    fi
+}
+
+
+# Prepare action  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare() {
+    setup_environment
+
+    if [ -e "${deploy_root}" ] ; then
+	rm -rf "${deploy_root}"
+    fi
+
+    mkdir -p "${deploy_root}"
+}
+
+
+# Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+generate() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing numnode operand"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing dest operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
+    fi
+
+    set -x
+
+    local numnode="$1" ; shift
+    local destdir="$1" ; shift
+    local log pid index i
+
+    if ! echo "${numnode}" | grep -Pq '^\d+$' ; then
+	fatal "invalid numnode operand"
+    fi
+
+    if ! echo "${destdir}" | grep -Pq '^/' ; then
+	destdir="${PWD}/${destdir}"
+    fi
+
+    setup_environment
+
+    log="$(mktemp --suffix='.log' "${deploy_root}/diem-swarm.XXXXXX")"
+
+    (
+	for i in $(seq 0 600) ; do
+	    printf "account create\n"
+	    printf "account mint %d 1000000 XUS\n" ${i}
+	done
+	printf "account list\n"
+	printf "account write ${destdir}/wallet\n"
+    ) | \
+    diem-swarm --num-nodes ${numnode} --config-dir "${destdir}" \
+               --diem-node "$(which 'diem-node')" \
+	       --start-client --cli-path "$(which 'cli')" \
+	       2>&1 | tee "${log}"
+
+    mv "${log}" "${destdir}/logs/init.log"
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'prepare')
+	prepare "$@"
+	;;
+    'generate')
+	generate "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac

@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+#   install-algorand - install the Algorand blockchain from its repository
+#
+
+set -e
+
+libra_url='https://github.com/diem/diem.git'
+libra_checkout='testnet'
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+sudo -n apt-get install -yy 'clang' 'cmake' 'gcc' 'git' 'libssl-dev' 'make' \
+     'pkg-config' 'rustc'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Clone Libra from the official repository and build it.
+#
+git clone "${libra_url}" 'install/libra'
+(
+    cd 'install/libra'
+
+    git checkout "${libra_checkout}"
+
+    export RUSTFLAGS="-Ctarget-cpu=native -Ctarget-feature=+aes,+sse2,+sse4.1,+ssse3"
+    export CARGO_PROFILE_RELEASE_LTO=thin
+
+    # I don't know why but the compilation sometimes fails midway for no
+    # reason (although I suspect it's because of out-of-memory).
+    # Restart the compilation a couple of times until it compiles.
+    #
+    for try in $(seq 1 10) ; do
+	if cargo build --release \
+		 -p diem-node \
+		 -p diem-swarm \
+		 -p cli
+	then
+	    break
+	fi
+    done
+)
