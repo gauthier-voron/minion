@@ -61,7 +61,7 @@ sub _init
 	delete($opts{SHARED});
     } else {
 	$self->{__PACKAGE__()}->{_shared} = File::Temp->newdir
-	    ('minion.XXXXXX', SUFFIX => '.d', TMPDIR => 1);
+	    ('minion.XXXXXX', SUFFIX => '.d');
     }
 
     confess(join(' ', keys(%opts))) if (%opts);
