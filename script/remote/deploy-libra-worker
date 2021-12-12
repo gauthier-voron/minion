@@ -67,7 +67,7 @@ generate() {
 
     local numnode="$1" ; shift
     local destdir="$1" ; shift
-    local log pid index i
+    local log pid index i dir
 
     if ! echo "${numnode}" | grep -Pq '^\d+$' ; then
 	fatal "invalid numnode operand"
@@ -95,6 +95,12 @@ generate() {
 	       2>&1 | tee "${log}"
 
     mv "${log}" "${destdir}/logs/init.log"
+
+    for dir in "${destdir}/"* ; do
+	if [ -d "${dir}" -a -f "${dir}/node.yaml" ] ; then
+	    mv "${dir}" "${destdir}/n${dir##*/}"
+	fi
+    done
 }
 
 

@@ -238,7 +238,7 @@ sub dispatch_network
 
 	$proc = $worker->send(
 	    [
-	     ( map { $network . '/' . $_ } @{$nodes->{$ip}->{'indices'}} ),
+	     ( map { $network . '/n' . $_ } @{$nodes->{$ip}->{'indices'}} ),
 	     $network . '/mint.key',
 	     $network . '/wallet',
 	     $network . '/waypoint'
@@ -295,7 +295,7 @@ sub setup_paths
 
     foreach $ip (keys(%$nodes)) {
 	foreach $index (@{$nodes->{$ip}->{'indices'}}) {
-	    $path = $network . '/' . $index . '/node.yaml';
+	    $path = $network . '/n' . $index . '/node.yaml';
 	    $text = '';
 
 	    if (!open($fh, '<', $path)) {
@@ -304,6 +304,8 @@ sub setup_paths
 
 	    while (defined($line = <$fh>)) {
 		$line =~ s|$from|$to|g;
+		$line =~ s|$to/(\d+)/|$to/n$1/|g;
+		$line =~ s|$to/(\d+)$|$to/n$1|g;
 		$text .= $line;
 	    }
 
@@ -370,7 +372,7 @@ sub setup_addresses
 
     foreach $ip (keys(%$nodes)) {
 	foreach $index (@{$nodes->{$ip}->{'indices'}}) {
-	    $path = $network . '/' . $index . '/node.yaml';
+	    $path = $network . '/n' . $index . '/node.yaml';
 	    $confs{$index} = YAML::LoadFile($path);
 
 	    $port = $confs{$index}->{'validator_network'}->{'listen_address'};
@@ -446,7 +448,7 @@ sub setup_addresses
 
     foreach $ip (keys(%$nodes)) {
 	foreach $index (@{$nodes->{$ip}->{'indices'}}) {
-	    $path = $network . '/' . $index . '/node.yaml';
+	    $path = $network . '/n' . $index . '/node.yaml';
 	    YAML::DumpFile($path, $confs{$index});
 	}
     }
