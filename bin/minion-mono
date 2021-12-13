@@ -20,9 +20,9 @@ my $BOOT_USER   = 'ubuntu';
 my $BOOT_REGION = 'eu-central-1';
 my $BOOT_SECGRP = 'default';
 my $BOOT_RESIZE = 32;
-my @BOOT_CHAINS = qw(algorand quorum poa solana);
+my @BOOT_CHAINS = qw(algorand quorum poa solana avalanche);
 
-my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa solana);
+my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa solana avalanche);
 
 
 sub run

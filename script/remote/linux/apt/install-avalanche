@@ -1,0 +1,54 @@
+#!/bin/bash
+#
+#   install-avalanche - install the Avalanche blockchain from its repository
+#
+
+set -e
+
+golang_url="https://go.dev/dl/go1.16.8.linux-$(dpkg --print-architecture).tar.gz"
+
+avalanche_url='https://github.com/ava-labs/avalanchego'
+avalanche_checkout='master'
+# remove when eth_gasPrice is fixed
+export CORETH_VERSION=v0.8.0-rc.2
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+# Install common utilities as well as golang 1.16.8.
+# This specific version of golang is required by Avalanche.
+# We install it along the standard golang version and add it to the PATH when
+# building Avalanche.
+#
+sudo -n apt-get install -yy 'git' 'make' 'gcc' 'g++'
+curl -L "${golang_url}" | tar --one-top-level='install/go1.16.8' --strip-components=1 -xzf -
+export PATH="${PWD}/install/go1.16.8/bin:${PATH}"
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Clone Avalanche from the official repository and build it.
+#
+git clone "${avalanche_url}" 'install/avalanche'
+(
+    cd 'install/avalanche'
+
+    git checkout "${avalanche_checkout}"
+
+    # Avoid modification outside of this repository.
+    # This is important because some other installed software could use
+    # different versions of Go.
+    #
+    export GOPATH="${PWD}/go"
+
+    ./scripts/build.sh
+
+    # net_version workaround
+    sudo sed -i '316i ethConfig.NetworkId = vm.chainID.Uint64()' './go/pkg/mod/github.com/ava-labs/coreth@v0.8.0-rc.2/plugin/evm/vm.go'
+    ./scripts/build.sh
+)

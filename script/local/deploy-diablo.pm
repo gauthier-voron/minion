@@ -41,6 +41,7 @@ my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
 my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
 my $SOLANA_CHAIN_PATH = $SHARED . '/solana/chain.yaml';
 my $SOLANA_ACCOUNTS_PATH = $SHARED . '/solana/accounts.yaml.gz';
+my $AVALANCHE_CHAIN_PATH = $SHARED . '/avalanche/chain.yaml';
 
 
 # Extract from the given $path the Quorum nodes.
@@ -174,6 +175,11 @@ sub deploy_diablo_solana
     return deploy_diablo_file(@_, $SOLANA_CHAIN_PATH, $CHAIN_LOC) && deploy_diablo_file(@_, $SOLANA_ACCOUNTS_PATH, $ACCOUNTS_LOC);
 }
 
+sub deploy_diablo_avalanche
+{
+    return deploy_diablo_file(@_, $AVALANCHE_CHAIN_PATH, $CHAIN_LOC);
+}
+
 
 sub specialize_workload
 {
@@ -287,6 +293,10 @@ sub deploy_diablo
 
 	if (-f $SOLANA_CHAIN_PATH && -f $SOLANA_ACCOUNTS_PATH) {
 	return deploy_diablo_solana($nodes, $primary, \@secondaries);
+    }
+
+	if (-f $AVALANCHE_CHAIN_PATH) {
+	return deploy_diablo_avalanche($nodes, $primary, \@secondaries);
     }
 
 

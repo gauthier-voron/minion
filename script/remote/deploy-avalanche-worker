@@ -1,0 +1,278 @@
+#!/bin/bash
+
+set -e
+
+script_name='deploy-avalanche-worker'
+go_root="${HOME}/install/go1.16.8"
+deploy_root="${HOME}/deploy/avalanche"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 prepare                                                (1)"
+    echo "       $0 generate <nodefile> <keyfile>                          (2)"
+    echo
+    echo "Prepare the Avalanche running directory in (1) or use the Avalanche"
+    echo "toolchain to generate a network from a list of nodes <nodefile> and"
+    echo "list of the accounts to add with an initial balance in the "
+    echo "blockchain."
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${go_root}" ] ; then
+	fatal "cannot find go 1.16.8 install at '${go_root}'"
+    fi
+
+    export PATH="${go_root}/bin:${PATH}"
+
+    if ! command -v 'go' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find go executable in '${go_root}'"
+    fi
+
+    export GOPATH="${deploy_root}/go"
+}
+
+
+# Prepare action  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+prepare() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    if [ -e "${deploy_root}" ] ; then
+	sudo rm -rf "${deploy_root}"
+    fi
+
+    if [ ! -d "${deploy_root}" ] ; then
+	mkdir -p "${deploy_root}"
+    fi
+}
+
+
+# Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+generate() {
+    if [ $# -lt 1 ] ; then
+	fatal "missing nodefile operand"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing keyfile operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
+    fi
+
+    local nodefile="$1" ; shift
+    local keyfile="$1" ; shift
+    local netroot="${deploy_root}/network"
+
+    setup_environment
+
+    mkdir "${netroot}"
+
+    cd "${deploy_root}"
+
+    cat > 'main.go' <<'EOF'
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/ava-labs/avalanche-network-runner/network"
+	"github.com/ava-labs/avalanche-network-runner/utils"
+	"github.com/ava-labs/avalanchego/ids"
+	"github.com/ava-labs/avalanchego/staking"
+	"github.com/ava-labs/avalanchego/utils/constants"
+	"github.com/ava-labs/avalanchego/utils/logging"
+)
+
+type Config struct {
+	NetworkId                 string `json:"network-id"`
+	PublicIp                  string `json:"public-ip"`
+	StakingPort               uint   `json:"staking-port"`
+	HttpHost                  string `json:"http-host"`
+	HttpPort                  uint   `json:"http-port"`
+	StakingTlsCertFileContent []byte `json:"staking-tls-cert-file-content"`
+	StakingTlsKeyFileContent  []byte `json:"staking-tls-key-file-content"`
+	GenesisContent            []byte `json:"genesis-content"`
+	BootstrapIds              string `json:"bootstrap-ids"`
+	BootstrapIps              string `json:"bootstrap-ips"`
+	LogLevel                  string `json:"log-level"`
+}
+
+type CConfig struct {
+	LogLevel string `json:"log-level"`
+}
+
+func main() {
+	netroot := os.Args[1]
+	nodefile, err := os.Open(os.Args[2])
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer nodefile.Close()
+	keyfile, err := os.Open(os.Args[3])
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer keyfile.Close()
+
+	configs := make([]Config, 0)
+	networkID := uint32(1337)
+	baseConfig := Config{
+		NetworkId: fmt.Sprintf("network-%d", networkID),
+		LogLevel:  "info",
+	}
+	cConfig := CConfig{
+		LogLevel: "trace",
+	}
+
+	genesisVdrs := make([]ids.ShortID, 0)
+	scanner := bufio.NewScanner(nodefile)
+	for scanner.Scan() {
+		tokens := strings.Split(scanner.Text(), ":")
+		crt, key, err := staking.NewCertAndKeyBytes()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		nodeID, err := utils.ToNodeID(key, crt)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		genesisVdrs = append(genesisVdrs, nodeID)
+
+		config := baseConfig
+		config.PublicIp = tokens[0]
+		config.HttpHost = "0.0.0.0"
+		httpPort, err := strconv.Atoi(tokens[1])
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		config.HttpPort = uint(httpPort)
+		stakingPort, err := strconv.Atoi(tokens[2])
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		config.StakingPort = uint(stakingPort)
+		config.StakingTlsCertFileContent = crt
+		config.StakingTlsKeyFileContent = key
+		if len(genesisVdrs) == 1 {
+			baseConfig.BootstrapIds = nodeID.PrefixedString(constants.NodeIDPrefix)
+			baseConfig.BootstrapIps = fmt.Sprintf("%s:%s", tokens[0], tokens[2])
+		}
+		configs = append(configs, config)
+	}
+
+	cChainBalances := make([]network.AddrAndBalance, 0)
+	scanner = bufio.NewScanner(keyfile)
+	for scanner.Scan() {
+		tokens := strings.Split(scanner.Text(), ":")
+		addr, err := hex.DecodeString(tokens[0])
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		id, err := ids.ToShortID(addr)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		cChainBalances = append(cChainBalances, network.AddrAndBalance{
+			Addr:    id,
+			Balance: 0x1337133713371337,
+		})
+	}
+
+	genesis, err := network.NewAvalancheGoGenesis(
+		logging.NoLog{},
+		networkID,
+		nil,
+		cChainBalances,
+		genesisVdrs,
+	)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	genesis = bytes.ReplaceAll(
+		genesis,
+		[]byte("0x1337133713371337"),
+		[]byte("0x118427b3b4a05bc8a8a4de845986800000000000"),
+	)
+	for i, config := range configs {
+		dir := fmt.Sprintf("%s/n%d/.%s", netroot, i, constants.AppName)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		err = os.MkdirAll(fmt.Sprintf("%s/configs/chains/C", dir), 0755)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		config.GenesisContent = genesis
+		configJson, err := json.Marshal(config)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		os.WriteFile(fmt.Sprintf("%s/config.json", dir), configJson, 0644)
+		cConfigJson, err := json.Marshal(cConfig)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		os.WriteFile(fmt.Sprintf("%s/configs/chains/C/config.json", dir), cConfigJson, 0644)
+	}
+}
+EOF
+    chmod 755 'main.go'
+
+    go mod init "${script_name}"
+
+    go mod tidy
+
+    go run 'main.go' "${netroot}" "${HOME}/${nodefile}" "${HOME}/${keyfile}"
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'prepare')
+	prepare "$@"
+	;;
+    'generate')
+	generate "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac
