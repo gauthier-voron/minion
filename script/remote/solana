@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+
+set -e
+
+script_name='solana'
+install_root="${HOME}/install/solana"
+deploy_root="${HOME}/deploy/solana"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 start (1)"
+    echo "       $0 stop (2)"
+    echo "       $0 kill (3)"
+    echo
+    echo "Either start (1), gracefully stop (2) or kill (3) the nodes deployed"
+    echo "on this worker"
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find solana install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/bin:${PATH}"
+
+    if ! command -v 'solana-validator' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find solana-validator executable in '${install_root}'"
+    fi
+}
+
+waitForNodeToInit() {
+	local initCompleteFile="$1" ; shift
+    local waitTime="$1" ; shift
+
+	echo "--- waiting for $initCompleteFile"
+	declare startTime=$SECONDS
+	while [[ ! -r $initCompleteFile ]]; do
+	declare timeWaited=$((SECONDS - startTime))
+	if [[ $timeWaited -ge $waitTime ]]; then
+		echo "^^^ +++"
+		echo "Error: $initCompleteFile not found in $timeWaited seconds"
+		nkill
+		exit 1
+	fi
+	echo "Waiting for $initCompleteFile ($timeWaited)..."
+	sleep 5
+	done
+	echo "$initCompleteFile detected"
+}
+
+
+# Actions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+start() {
+    local dir configdir pid rpcport gossipport dynamicport addr bootstrapaddr bootstrapgossipport
+
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    for dir in "${deploy_root}/n"* ; do
+	if [ -d "${dir}" ] ; then
+		configdir="${dir}/config"
+	    rpcport="$(cat "${configdir}/rpcport")"
+	    gossipport="$(cat "${configdir}/gossipport")"
+	    dynamicport="$(cat "${configdir}/dynamicport")"
+
+	    if ! echo "${rpcport}" | grep -Pq '^\d+$' ; then
+		fatal "cannot find rpc port in '${configdir}/rpcport'"
+	    fi
+
+	    if ! echo "${gossipport}" | grep -Pq '^\d+$' ; then
+		fatal "cannot find gossip port in '${configdir}/gossipport'"
+	    fi
+
+	    if ! echo "${dynamicport}" | grep -Pq '^\d+$' ; then
+		fatal "cannot find dynamic port in '${configdir}/dynamicport'"
+	    fi
+
+		if [ -d "${configdir}/bootstrap-validator" ] ; then
+		addr="$(cat "${configdir}/addr")"
+		"${dir}"/multinode-demo/bootstrap-validator.sh \
+		 --gossip-host ${addr} \
+		 --gossip-port ${gossipport} \
+		 --dynamic-port-range "${dynamicport}-$(( dynamicport + 10 ))" \
+		 --init-complete-file "${dir}/init-complete-node.log" \
+		 --wait-for-supermajority 1 \
+		 --allow-private-addr \
+		 --expected-bank-hash "$(cat "${configdir}/bank-hash")" \
+		 --enable-rpc-transaction-history \
+		 > "${dir}/out" 2> "${dir}/err" &
+		else
+		bootstrapaddr="$(cat "${configdir}/bootstrapaddr")"
+	    bootstrapgossipport="$(cat "${configdir}/bootstrapgossipport")"
+
+		if ! echo "${bootstrapgossipport}" | grep -Pq '^\d+$' ; then
+		fatal "cannot find bootstrap gossip port in '${configdir}/bootstrapgossipport'"
+	    fi
+
+		export SKIP_ACCOUNTS_CREATION=1
+		"${dir}"/multinode-demo/validator.sh \
+		 --entrypoint "${bootstrapaddr}:${bootstrapgossipport}" \
+		 --gossip-port ${gossipport} \
+		 --rpc-port ${rpcport} \
+		 --dynamic-port-range "${dynamicport}-$(( dynamicport + 10 ))" \
+		 --expected-shred-version "$(cat "${configdir}/shred-version")" \
+		 --identity "${configdir}/identity.json" \
+		 --vote-account "${configdir}/vote-account.json" \
+		 --no-airdrop \
+		 --expected-bank-hash "$(cat "${configdir}/bank-hash")" \
+		 --init-complete-file "${dir}/init-complete-node.log" \
+		 --wait-for-supermajority 1 \
+		 --allow-private-addr \
+		 --enable-rpc-transaction-history \
+		 > "${dir}/out" 2> "${dir}/err" &
+		fi
+	    pid=$!
+
+	    echo ${pid} > "${dir}/pid"
+	fi
+    done
+
+	for dir in "${deploy_root}/n"* ; do
+	if [ -d "${dir}" ] ; then
+		waitForNodeToInit "${dir}/init-complete-node.log" 60
+	fi
+	done
+
+    sleep 2
+}
+
+_kill() {
+    local sig="$1" ; shift
+    local dir pid dead
+
+    for dir in "${deploy_root}/n"* ; do
+	if [ ! -d "${dir}" ] ; then
+	    continue
+	elif [ ! -f "${dir}/pid" ] ; then
+	    continue
+	fi
+
+	pid="$(cat "${dir}/pid")"
+
+	if echo "${pid}" | grep -Pq '^\d+$' ; then
+	    kill "${sig}" $(ps -o pid= --ppid ${pid}) 2> '/dev/null' || true
+	fi
+
+	dead=0
+	for i in $(seq 1 5) ; do
+	    if ! ps ${pid} > '/dev/null' ; then
+		dead=1
+		break
+	    fi
+
+	    sleep 1
+	done
+
+	if [ ${dead} -eq 0 ] ; then
+	    kill -KILL $(ps -o pid= --ppid ${pid}) 2> '/dev/null' || true
+	fi
+
+	rm "${dir}/pid"
+    done
+}
+
+stop() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    _kill -INT
+}
+
+nkill() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    _kill -KILL
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+setup_environment
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'kill')
+	nkill "$@"
+	;;
+    'start')
+	start "$@"
+	;;
+    'stop')
+	stop "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac

@@ -1,4 +1,4 @@
-#!/usr/bin/perl -l
+#!/usr/bin/env -S perl -l
 
 use lib qw(. lib);
 use strict;
@@ -20,9 +20,9 @@ my $BOOT_USER   = 'ubuntu';
 my $BOOT_REGION = 'eu-central-1';
 my $BOOT_SECGRP = 'default';
 my $BOOT_RESIZE = 32;
-my @BOOT_CHAINS = qw(algorand quorum poa);
+my @BOOT_CHAINS = qw(algorand quorum poa solana avalanche);
 
-my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa);
+my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa solana avalanche);
 
 
 sub run
@@ -342,7 +342,7 @@ sub boot
 	    printf(": done\n");
 	}
     }
-    
+
     if ($opts{VERBOSE}) {
 	printf("Installing instances\n");
     } else {
@@ -405,6 +405,13 @@ sub boot
 	$fleet->cancel()->get();
 	printf(STDERR "%s", $log);
 	fatal("cannot install solidity");
+    }
+
+	$log = '';
+    if ($runner->run($fleet, [ 'install-solang' ], %copts)->wait() != 0) {
+	$fleet->cancel()->get();
+	printf(STDERR "%s", $log);
+	fatal("cannot install solang");
     }
 
     if ($opts{VERBOSE}) {
@@ -482,7 +489,7 @@ Options:
 
 Chains:
 
-  Identifier   Full name     Consensus        Smart contract  
+  Identifier   Full name     Consensus        Smart contract
   -----------  ------------  ---------        ---------------
 
   algorand     Algorand      BA* (BFT)        Teal (.teal)
@@ -492,6 +499,8 @@ Chains:
   quorum-ibft  Quorum        IBFT (BFT)       Solidity (.sol)
 
   quorum-raft  Quorum        Raft (CFT)       Solidity (.sol)
+
+  solana       Solana        Tower BFT (BFT)  Solidity (.sol)
 
 EOF
 }

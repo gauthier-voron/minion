@@ -1,0 +1,171 @@
+#!/bin/bash
+
+set -e
+
+script_name='avalanche'
+install_root="${HOME}/install/avalanche"
+deploy_root="${HOME}/deploy/avalanche"
+
+
+# Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+fatal() {
+    local msg="$1" ; shift
+
+    exec >&2
+
+    echo "${script_name}: ${msg}"
+    echo
+    echo "Usage: $0 start (1)"
+    echo "       $0 stop (2)"
+    echo "       $0 kill (3)"
+    echo
+    echo "Either start (1), gracefully stop (2) or kill (3) the nodes deployed"
+    echo "on this worker"
+
+    exit 1
+}
+
+setup_environment() {
+    if [ ! -e "${install_root}" ] ; then
+	fatal "cannot find avalanche install at '${install_root}'"
+    fi
+
+    export PATH="${install_root}/build:${PATH}"
+
+    if ! command -v 'avalanchego' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find avalanchego executable in '${install_root}'"
+    fi
+}
+
+waitForNodeToInit() {
+	local port="$1" ; shift
+    local waitTime="$1" ; shift
+
+	echo "--- waiting for $port"
+	declare startTime=$SECONDS
+	while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:$port/ext/health)" != "200" ]]; do
+	declare timeWaited=$((SECONDS - startTime))
+	if [[ $timeWaited -ge $waitTime ]]; then
+		echo "^^^ +++"
+		echo "Error: $port not ready in $timeWaited seconds"
+		nkill
+		exit 1
+	fi
+	echo "Waiting for $port ($timeWaited)..."
+	sleep 5
+	done
+	echo "$port ready"
+}
+
+
+# Actions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+start() {
+    local dir pid config
+
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    for dir in "${deploy_root}/n"* ; do
+	if [ -d "${dir}" ] ; then
+	    config="${dir}/.avalanchego/config.json"
+
+	    if [ ! -e "${config}" ] ; then
+        fatal "cannot find avalanche config.json at '${config}'"
+        fi
+
+	    HOME="${dir}" avalanchego --config-file "${config}" \
+		 > "${dir}/out" 2> "${dir}/err" &
+	    pid=$!
+
+	    echo ${pid} > "${dir}/pid"
+	fi
+    done
+
+    for dir in "${deploy_root}/n"* ; do
+	if [ -d "${dir}" ] ; then
+		waitForNodeToInit "$(grep -oP '(?<="http-port":)[^,]*' ${dir}/.avalanchego/config.json)" 60
+	fi
+	done
+
+    sleep 2
+}
+
+_kill() {
+    local sig="$1" ; shift
+    local dir pid dead
+
+    for dir in "${deploy_root}/n"* ; do
+	if [ ! -d "${dir}" ] ; then
+	    continue
+	elif [ ! -f "${dir}/pid" ] ; then
+	    continue
+	fi
+
+	pid="$(cat "${dir}/pid")"
+
+	if echo "${pid}" | grep -Pq '^\d+$' ; then
+	    kill "${sig}" ${pid} 2> '/dev/null' || true
+	fi
+
+	dead=0
+	for i in $(seq 1 5) ; do
+	    if ! ps ${pid} > '/dev/null' ; then
+		dead=1
+		break
+	    fi
+
+	    sleep 1
+	done
+
+	if [ ${dead} -eq 0 ] ; then
+	    kill -KILL ${pid} 2> '/dev/null' || true
+	fi
+
+	rm "${dir}/pid"
+    done
+}
+
+stop() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    _kill -INT
+}
+
+nkill() {
+    if [ $# -gt 0 ] ; then
+	fatal "unexpected operand '$1'"
+    fi
+
+    _kill -KILL
+}
+
+
+# Main script - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+setup_environment
+
+if [ $# -lt 1 ] ; then
+    fatal "missing action operand"
+fi
+
+action="$1" ; shift
+
+case "${action}" in
+    'kill')
+	nkill "$@"
+	;;
+    'start')
+	start "$@"
+	;;
+    'stop')
+	stop "$@"
+	;;
+    *)
+	fatal "unknown action: '${action}'"
+	;;
+esac

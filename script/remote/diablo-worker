@@ -14,6 +14,7 @@ set -e
 script_name='diablo-worker'
 install_root="${HOME}/install/diablo"
 solidity_root="${HOME}/install/solidity"
+solang_root="${HOME}/install/solang"
 deploy_root="${HOME}/deploy/diablo"
 
 
@@ -50,6 +51,10 @@ setup_environment() {
 
     if [ -d "${solidity_root}" ] ; then
 	export PATH="${solidity_root}/build/solc/:${PATH}"
+    fi
+
+	if [ -d "${solang_root}" ] ; then
+	export PATH="${solang_root}/target/release:${PATH}"
     fi
 }
 

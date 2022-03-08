@@ -1,4 +1,4 @@
-#!/usr/bin/perl -l
+#!/usr/bin/env -S perl -l
 
 use lib qw(. lib);
 use strict;
@@ -58,10 +58,13 @@ my @PREPARE_ALLINSTALLS = (
 );
 my @PREPARE_INSTALLS = (
     [ 'install-algorand' ],
+    [ 'install-avalanche'],
     [ 'install-diablo'   ],
     [ 'install-libra'    ],
     [ 'install-poa'      ],
     [ 'install-quorum'   ],
+    [ 'install-solang'   ],
+    [ 'install-solana'   ],
     [ 'install-solidity' ]
 );
 
@@ -90,7 +93,7 @@ my $RUN_RESULT = sub {
 		   $year, $mon, $day, $hour, $min, $sec);
 };
 my @RUN_INSTALLS = ();
-my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa libra);
+my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa libra solana avalanche);
 my @RUN_BREAKPOINTS = qw(boot install sync deploy chain benchmark);
 
 

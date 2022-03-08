@@ -40,6 +40,8 @@ my $LIBRA_CHAIN_PATH = $SHARED . '/libra/chain.yaml';
 my $POA_CHAIN_PATH = $SHARED . '/poa/chain.yaml';
 my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
 my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
+my $SOLANA_CHAIN_PATH = $SHARED . '/solana/chain.yaml';
+my $AVALANCHE_CHAIN_PATH = $SHARED . '/avalanche/chain.yaml';
 
 
 # Extract from the given $path the Quorum nodes.
@@ -76,7 +78,7 @@ sub get_nodes
 		if ($worker->can('public_ip')) {
 		    $assigned = $worker->public_ip();
 		} elsif ($worker->can('host')) {
-		    $assigned = $worker->host_ip();
+		    $assigned = $worker->host();
 		}
 
 		if ($assigned eq $ip) {
@@ -225,6 +227,16 @@ sub deploy_diablo_quorum_raft
     return deploy_diablo_chain(@_, $QUORUMRAFT_CHAIN_PATH);
 }
 
+sub deploy_diablo_solana
+{
+    return deploy_diablo_chain(@_, $SOLANA_CHAIN_PATH);
+}
+
+sub deploy_diablo_avalanche
+{
+    return deploy_diablo_chain(@_, $AVALANCHE_CHAIN_PATH);
+}
+
 
 sub specialize_workload
 {
@@ -338,6 +350,14 @@ sub deploy_diablo
 
     if (-f $QUORUMRAFT_CHAIN_PATH) {
 	return deploy_diablo_quorum_raft($nodes, $primary, \@secondaries);
+    }
+
+	if (-f $SOLANA_CHAIN_PATH) {
+	return deploy_diablo_solana($nodes, $primary, \@secondaries);
+    }
+
+	if (-f $AVALANCHE_CHAIN_PATH) {
+	return deploy_diablo_avalanche($nodes, $primary, \@secondaries);
     }
 
 

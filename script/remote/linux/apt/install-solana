@@ -1,0 +1,46 @@
+#!/bin/bash
+#
+#   install-solana - install the Solana blockchain from its repository
+#
+
+set -e
+
+solana_url='https://github.com/solana-labs/solana.git'
+solana_checkout='v1.8.5'
+
+if ! command -v 'sudo' > '/dev/null' ; then
+    echo "Cannot find command 'sudo'" >&2
+    exit 1
+fi
+
+# Install common utilities, cargo, and Solana build dependencies.
+#
+sudo -n apt-get install -yy 'git' 'make' 'cargo' 'rustfmt' 'libssl-dev' 'libudev-dev' 'pkg-config' 'zlib1g-dev' 'llvm' 'clang'
+
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+# Clone Solana from the official repository and build it.
+#
+git clone "${solana_url}" 'install/solana'
+(
+    cd 'install/solana'
+
+    git checkout "${solana_checkout}"
+
+    arch=$(uname -m)
+    if [[ $arch = x86_64 ]]; then
+        curl -L "https://github.com/lebdron/solana/releases/download/v1.8.5/solana1.8.5-linux-x86-64.tar.xz" | tar Jxf -
+
+        exit 0
+    fi
+
+    # force the script to use system cargo
+    sed -i '/cargo=/s/^/#/' scripts/cargo-install-all.sh
+    sed -i 's/"$cargo"/cargo/g' scripts/cargo-install-all.sh
+
+    ./scripts/cargo-install-all.sh --validator-only .
+)
