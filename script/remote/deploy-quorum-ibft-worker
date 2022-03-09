@@ -190,6 +190,10 @@ generate() {
     initialize_accounts "${netroot}/genesis.json" "${keyfile}"
 
     initialize_nodes "${netroot}" "${nodefile}"
+
+    tar -C "${deploy_root}" -czf "${netroot}.tar.gz" 'network'
+
+    rm -rf "${netroot}"
 }
 
 finalize() {

@@ -17,12 +17,12 @@ fatal() {
     echo "${script_name}: ${msg}"
     echo
     echo "Usage: $0 prepare                                                (1)"
-    echo "       $0 generate <nodefile> <numkeys>                          (2)"
+    echo "       $0 generate <nodefile> <keyfile>                          (2)"
     echo
     echo "Prepare the Solana running directory in (1) or use the Solana"
     echo "toolchain to generate a network from a list of nodes <nodefile> and"
-    echo "number of the accounts (which will be rounded up to the next multiple"
-    echo "of 2) to add with an initial balance in the blockchain."
+    echo "list of the accounts to add with an initial balance in the "
+    echo "blockchain."
 
     exit 1
 }
@@ -34,8 +34,8 @@ setup_environment() {
 
     export PATH="${install_root}/bin:${PATH}"
 
-    if ! command -v 'solana-bench-exchange' > '/dev/null' 2> '/dev/null' ; then
-	fatal "cannot find solana-bench-exchange executable in '${install_root}'"
+    if ! command -v 'solana-keygen' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find solana-keygen executable in '${install_root}'"
     fi
 }
 
@@ -54,24 +54,13 @@ prepare() {
     if [ ! -d "${deploy_root}" ] ; then
 	mkdir -p "${deploy_root}"
     fi
+
+    pkill -f 'multinode-demo' || true
+    pkill -f 'solana-validator' || true
 }
 
 
 # Generate action - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-generate_accounts() {
-    local numkeys="$1" ; shift
-    local path batchsize
-
-
-    path="$deploy_root/accounts.yaml"
-    batchsize=$(( numkeys + 1 ))
-    batchsize=$(( batchsize / 2 ))
-
-    solana-bench-exchange --write-client-keys "$path" --fund-amount 50000000000 --account-groups 1 --batch-size "$batchsize"
-    sed -i '1d' "$path"
-    echo "" >> "$path"
-}
 
 generate_nodes() {
     local netroot="$1" ; shift
@@ -107,12 +96,14 @@ generate_nodes() {
 generate_genesis() {
     local netroot="$1" ; shift
     local nodefile="$1" ; shift
+    local keyfile="$1" ; shift
     local nodenum dir configdir args path
 
     nodenum=$(cat "${nodefile}" | wc -l)
     dir="${netroot}/n0"
     configdir="${dir}/config"
-    args=(--primordial-accounts-file "$deploy_root/accounts.yaml")
+    gunzip -k "${keyfile}.gz" || true
+    args=(--primordial-accounts-file "${HOME}/${keyfile}")
 
     for i in $(seq 2 ${nodenum}) ; do
 	path="${netroot}/n$(( i - 1 ))/config"
@@ -129,6 +120,7 @@ generate_genesis() {
         export BOOTSTRAP_VALIDATOR_VOTE_KEYPAIR="${configdir}/vote-account.json"
         multinode-demo/setup.sh "${args[@]}"
     )
+    rm "${keyfile}"
 
     solana-ledger-tool -l "$configdir"/bootstrap-validator create-snapshot 0 "$configdir"/bootstrap-validator --warp-slot 1
     solana-ledger-tool -l "$configdir"/bootstrap-validator shred-version --max-genesis-archive-unpacked-size 1073741824 | tee "$configdir"/shred-version
@@ -146,24 +138,24 @@ generate() {
     if [ $# -lt 1 ] ; then
 	fatal "missing nodefile operand"
     elif [ $# -lt 2 ] ; then
-	fatal "missing numkeys operand"
+	fatal "missing keyfile operand"
     elif [ $# -gt 2 ] ; then
 	fatal "unexpected operand '$3'"
     fi
 
     local nodefile="$1" ; shift
-    local numkeys="$1" ; shift
+    local keyfile="$1" ; shift
     local netroot="${deploy_root}/network"
 
     setup_environment
 
-    generate_accounts "${numkeys}"
-
     generate_nodes "${netroot}" "${nodefile}"
 
-    generate_genesis "${netroot}" "${nodefile}"
+    generate_genesis "${netroot}" "${nodefile}" "${keyfile}"
 
-    gzip "$deploy_root/accounts.yaml"
+    tar -C "${deploy_root}" -czf "${netroot}.tar.gz" 'network'
+
+    rm -rf "${netroot}"
 }
 
 

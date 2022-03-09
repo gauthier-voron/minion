@@ -77,7 +77,7 @@ start() {
 		 --syncmode full \
 		 --mine \
 		 --miner.threads 1 \
-		 --verbosity 3 \
+		 --verbosity 2 \
 		 --networkid 10 \
 		 --ws \
 		 --ws.addr 0.0.0.0 \

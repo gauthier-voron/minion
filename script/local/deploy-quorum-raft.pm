@@ -10,7 +10,8 @@ use Minion::System::Pgroup;
 
 my $NODE_TCP_PORT = 7000;                       # First TCP port for consensus
 my $WS_TCP_PORT = 9000;                         # First TCP port for clients
-my $RAFT_TCP_PORT = 50000;                      # First extra TCP port for Raft
+my $RPC_TCP_PORT = 11000;                         # First TCP port for rpc
+my $RAFT_TCP_PORT = 13000;                      # First extra TCP port for Raft
 
 
 my $FLEET = $_;                        # Global parameter (setup by the Runner)
@@ -129,8 +130,8 @@ sub build_nodefile
 	$number = $nodes->{$ip}->{'number'};
 
 	for ($i = 0; $i < $number; $i++) {
-	    printf($fh "%s:%d:%d:%d\n", $ip, $NODE_TCP_PORT + $i,
-		   $RAFT_TCP_PORT + $i, $WS_TCP_PORT + $i);
+	    printf($fh "%s:%d:%d:%d:%d\n", $ip, $NODE_TCP_PORT + $i,
+		   $RAFT_TCP_PORT + $i, $WS_TCP_PORT + $i, $RPC_TCP_PORT + $i);
 	}
     }
 
@@ -243,17 +244,20 @@ sub deploy_quorum_raft
 
     # Fetch and dispatch generated testnet
 
-    $proc = $genworker->recv([ $NETWORK_LOC ], TARGET => $MINION_PRIVATE);
+    $proc = $genworker->recv([ $NETWORK_LOC . '.tar.gz' ], TARGET => $MINION_PRIVATE);
     if ($proc->wait() != 0) {
 	die ("cannot receive quorum-raft testnet from worker");
     }
+
+    system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
+	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
     build_chainfile($CHAIN_PATH, $nodes);
 
     dispatch($nodes, $NETWORK_PATH);
 
     $genworker->execute(
-	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC ]
+	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC . '.tar.gz' ]
 	)->wait();
 
 

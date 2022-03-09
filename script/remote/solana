@@ -36,6 +36,8 @@ setup_environment() {
     if ! command -v 'solana-validator' > '/dev/null' 2> '/dev/null' ; then
 	fatal "cannot find solana-validator executable in '${install_root}'"
     fi
+
+	export RUST_LOG=warn
 }
 
 waitForNodeToInit() {
@@ -92,7 +94,7 @@ start() {
 		"${dir}"/multinode-demo/bootstrap-validator.sh \
 		 --gossip-host ${addr} \
 		 --gossip-port ${gossipport} \
-		 --dynamic-port-range "${dynamicport}-$(( dynamicport + 10 ))" \
+		 --dynamic-port-range "${dynamicport}-$(( dynamicport + 12 ))" \
 		 --init-complete-file "${dir}/init-complete-node.log" \
 		 --wait-for-supermajority 1 \
 		 --allow-private-addr \
@@ -112,7 +114,7 @@ start() {
 		 --entrypoint "${bootstrapaddr}:${bootstrapgossipport}" \
 		 --gossip-port ${gossipport} \
 		 --rpc-port ${rpcport} \
-		 --dynamic-port-range "${dynamicport}-$(( dynamicport + 10 ))" \
+		 --dynamic-port-range "${dynamicport}-$(( dynamicport + 12 ))" \
 		 --expected-shred-version "$(cat "${configdir}/shred-version")" \
 		 --identity "${configdir}/identity.json" \
 		 --vote-account "${configdir}/vote-account.json" \
@@ -132,7 +134,7 @@ start() {
 
 	for dir in "${deploy_root}/n"* ; do
 	if [ -d "${dir}" ] ; then
-		waitForNodeToInit "${dir}/init-complete-node.log" 60
+		waitForNodeToInit "${dir}/init-complete-node.log" 120
 	fi
 	done
 

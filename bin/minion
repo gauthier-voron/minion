@@ -25,7 +25,7 @@ my $PREPARE_DESCRIPTION = "Benchmark image for OSDI'22";
 my $PREPARE_DISK = 32;
 my $PREPARE_REGION = 'eu-central-1';
 my $PREPARE_KEY = 'default';
-my $PREPARE_NAME = 'minion-osdi22';
+my $PREPARE_NAME = 'minion-avalanche-solana';
 my $PREPARE_SIZE = 10;
 my $PREPARE_SECGROUP = 'default';
 my $PREPARE_TYPE = 'c5.9xlarge';
@@ -57,15 +57,15 @@ my @PREPARE_ALLINSTALLS = (
     [ 'install-geth-accounts', '--number=10000' ]
 );
 my @PREPARE_INSTALLS = (
-    [ 'install-algorand' ],
-    [ 'install-avalanche'],
-    [ 'install-diablo'   ],
-    [ 'install-libra'    ],
-    [ 'install-poa'      ],
-    [ 'install-quorum'   ],
-    [ 'install-solang'   ],
-    [ 'install-solana'   ],
-    [ 'install-solidity' ]
+    [ 'install-algorand'  ],
+    [ 'install-avalanche' ],
+    [ 'install-diablo'    ],
+    [ 'install-libra'     ],
+    [ 'install-poa'       ],
+    [ 'install-quorum'    ],
+    [ 'install-solang'    ],
+    [ 'install-solana'    ],
+    [ 'install-solidity'  ]
 );
 
 
@@ -75,7 +75,7 @@ my $BOOT_KEY      = $PREPARE_KEY;
 my $BOOT_SIZE     = 5;
 my $BOOT_DURATION = 36000;
 my $BOOT_SECGROUP = 'default';
-my $BOOT_TYPE     = 'c5.xlarge';
+my $BOOT_TYPE     = 'c5.4xlarge';
 my $BOOT_DISK     = undef;
 my @BOOT_INSTALLS = ();
 my @BOOT_REGIONS  = @PREPARE_REGIONS;
@@ -779,7 +779,7 @@ sub _boot
 	$out = '';
 	$err = '';
 	$proc = $runner->run(
-	    $fleet, $job,
+	    $gfleet, $job,
 	    STDOUT  => runlog(\$out), STDERR  => runlog(\$err),
 	    STDOUTS => runlog(\$out), STDERRS => runlog(\$err)
 	    );

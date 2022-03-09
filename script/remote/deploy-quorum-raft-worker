@@ -120,7 +120,7 @@ generate_nodes() {
     local nodefile="$1" ; shift
     local keyfile="$1" ; shift
     local genesis="$1" ; shift
-    local line addr port raftport wsport index dir enode sep
+    local line addr port raftport wsport rpcport index dir enode sep
 
     mkdir "${netroot}"
 
@@ -135,7 +135,8 @@ generate_nodes() {
 	    port="$(echo "${line}" | cut -d':' -f2)"
 	    raftport="$(echo "${line}" | cut -d':' -f3)"
 	    wsport="$(echo "${line}" | cut -d':' -f4)"
-	    
+	    rpcport="$(echo "${line}" | cut -d':' -f5)"
+
 	    dir="${netroot}/n${index}"
 
 	    mkdir "${dir}"
@@ -146,9 +147,11 @@ generate_nodes() {
 		rm "${dir}/geth.log"
 	    fi
 	    rm "${dir}/geth.log"
+	    echo "${addr}" > "${dir}/addr"
 	    echo "${port}" > "${dir}/port"
 	    echo "${raftport}" > "${dir}/raftport"
 	    echo "${wsport}" > "${dir}/wsport"
+	    echo "${rpcport}" > "${dir}/rpcport"
 
 	    bootnode --genkey="${dir}/nodekey"
 	    enode="$(bootnode --nodekey="${dir}/nodekey" --writeaddress)"
@@ -182,7 +185,7 @@ generate() {
     local nodefile="$1" ; shift
     local keyfile="$1" ; shift
     local netroot="${deploy_root}/network"
- 
+
     setup_environment
 
     generate_genesis "${deploy_root}/genesis.json" "${keyfile}"
@@ -191,6 +194,10 @@ generate() {
 		   "${deploy_root}/genesis.json"
 
     rm "${deploy_root}/genesis.json"
+
+    tar -C "${deploy_root}" -czf "${netroot}.tar.gz" 'network'
+
+    rm -rf "${netroot}"
 }
 
 

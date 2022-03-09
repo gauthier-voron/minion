@@ -5,22 +5,31 @@
 
 set -e
 
-diablo_url='https://github.com/NatoliChris/diablo-benchmark.git'
-diablo_checkout='osdi22'
+diablo_url='https://github.com/lebdron/diablo-benchmark.git'
+diablo_checkout='solana-sign-online'
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
     exit 1
 fi
 
+while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ; do
+    echo 'Waiting for release of dpkg/apt locks'
+    sleep 5
+done
+
 # Install common utilities as well as golang.
 #
-sudo -n apt-get install -yy 'git' 'make' 'golang'
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' 'golang'
 
 # Create an install dir if not already there.
 #
 if [ ! -e 'install' ] ; then
     mkdir 'install'
+fi
+
+if [ -e 'install/diablo' ] ; then
+    sudo rm -rf 'install/diablo'
 fi
 
 # Clone Diablo from the official repository and build it.

@@ -25,6 +25,16 @@ sudo growpart "/dev/${dev}" 1 || true
 sudo resize2fs "${part}" || true
 
 
-sudo -n apt-get update -yy
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ; do
+    echo 'Waiting for release of dpkg/apt locks'
+    sleep 5
+done
 
-sudo -n apt-get install 'psmisc'
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 update -yy
+
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ; do
+    echo 'Waiting for release of dpkg/apt locks'
+    sleep 5
+done
+
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 install 'psmisc'

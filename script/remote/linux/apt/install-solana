@@ -5,17 +5,28 @@
 
 set -e
 
+rust_version='1.59.0'
+rust_url="https://static.rust-lang.org/dist/rust-${rust_version}-$(uname -m)-unknown-linux-gnu.tar.gz"
+
 solana_url='https://github.com/solana-labs/solana.git'
-solana_checkout='v1.8.5'
+solana_checkout='master'
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
     exit 1
 fi
 
+while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ; do
+    echo 'Waiting for release of dpkg/apt locks'
+    sleep 5
+done
+
 # Install common utilities, cargo, and Solana build dependencies.
 #
-sudo -n apt-get install -yy 'git' 'make' 'cargo' 'rustfmt' 'libssl-dev' 'libudev-dev' 'pkg-config' 'zlib1g-dev' 'llvm' 'clang'
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' 'libssl-dev' 'libudev-dev' 'pkg-config' 'zlib1g-dev' 'llvm' 'clang'
+curl -L "${rust_url}" | tar --one-top-level="install/rust${rust_version}install" --strip-components=1 -xzf -
+."/install/rust${rust_version}install/install.sh" --destdir="install/rust${rust_version}" --prefix='' --without=rust-docs --disable-ldconfig
+export PATH="${PWD}/install/rust${rust_version}/bin:${PATH}"
 
 # Create an install dir if not already there.
 #
@@ -31,16 +42,79 @@ git clone "${solana_url}" 'install/solana'
 
     git checkout "${solana_checkout}"
 
-    arch=$(uname -m)
-    if [[ $arch = x86_64 ]]; then
-        curl -L "https://github.com/lebdron/solana/releases/download/v1.8.5/solana1.8.5-linux-x86-64.tar.xz" | tar Jxf -
-
-        exit 0
-    fi
+    export CARGO_HOME="${PWD}/.cargo"
+    export RUSTFLAGS="-Ctarget-cpu=native -Ctarget-feature=+aes,+sse2,+sse4.1,+ssse3"
+    export CARGO_PROFILE_RELEASE_LTO=thin
 
     # force the script to use system cargo
     sed -i '/cargo=/s/^/#/' scripts/cargo-install-all.sh
     sed -i 's/"$cargo"/cargo/g' scripts/cargo-install-all.sh
 
     ./scripts/cargo-install-all.sh --validator-only .
+)
+
+mkdir 'install/solana-accounts'
+(
+    cd 'install/solana-accounts'
+
+    cat > 'main.go' <<'EOF'
+package main
+
+import (
+	"bufio"
+	"crypto/ed25519"
+	"crypto/rand"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+)
+
+func main() {
+	path := os.Args[1]
+	amount, err := strconv.ParseUint(os.Args[2], 10, 64)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	size, err := strconv.ParseUint(os.Args[3], 10, 64)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	file, err := os.Create(path)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
+	defer writer.Flush()
+
+	fmt.Fprint(writer, "---")
+	for i := uint64(0); i < size; i++ {
+		seed := make([]byte, ed25519.SeedSize)
+		if _, err := io.ReadFull(rand.Reader, seed); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		privateKey := ed25519.NewKeyFromSeed(seed)
+		fmt.Fprint(writer, "\n\"[")
+		for _, v := range privateKey[:len(privateKey)-1] {
+			fmt.Fprintf(writer, "%d,", v)
+		}
+		fmt.Fprintf(writer, "%d]\":\n  balance: %d\n  owner: \"11111111111111111111111111111111\"\n  data: \"\"\n  executable: false", privateKey[len(privateKey)-1], amount)
+	}
+}
+EOF
+    chmod 755 'main.go'
+
+    go run 'main.go' accounts.yaml 50000000000 10000
+    sed -i '1d' accounts.yaml
+    echo "" >> accounts.yaml
+
+    gzip accounts.yaml
 )

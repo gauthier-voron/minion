@@ -241,17 +241,20 @@ sub deploy_avalanche
 
     # Fetch and dispatch generated testnet
 
-    $proc = $genworker->recv([ $NETWORK_LOC ], TARGET => $MINION_PRIVATE);
+    $proc = $genworker->recv([ $NETWORK_LOC . '.tar.gz' ], TARGET => $MINION_PRIVATE);
     if ($proc->wait() != 0) {
 	die ("cannot receive avalanche testnet from worker");
     }
+
+    system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
+	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
     build_chainfile($CHAIN_PATH, $nodes);
 
     dispatch($nodes, $NETWORK_PATH);
 
     $genworker->execute(
-	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC ]
+	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC . '.tar.gz' ]
 	)->wait();
 
 
