@@ -42,7 +42,6 @@ my $NODEFILE_LOC = $DEPLOY_ROOT . '/' . $NODEFILE_NAME;
 my $NETWORK_NAME = 'network';
 my $NETWORK_PATH = $MINION_PRIVATE . '/' . $NETWORK_NAME;
 my $NETWORK_LOC = $DEPLOY_ROOT . '/' . $NETWORK_NAME;
-my $ACCOUNTS_LOC = $DEPLOY_ROOT . '/accounts.yaml.gz';
 
 
 # Extract from the given $path the Quorum nodes.
@@ -126,7 +125,7 @@ sub build_nodefile
 
 	for ($i = 0; $i < $number; $i++) {
 	    printf($fh "%s:%d:%d:%d\n", $ip, $RPC_TCP_PORT + 2 * $i,
-		   $GOSSIP_TCP_PORT + $i, $DYNAMIC_TCP_PORT + 10 * $i);
+		   $GOSSIP_TCP_PORT + $i, $DYNAMIC_TCP_PORT + 12 * $i);
 	}
     }
 
@@ -153,7 +152,7 @@ sub build_chainfile
 	}
     }
 
-    printf($fh "extra:\n  - %d\n  - \"deploy/diablo/accounts.yaml.gz\"\n", 150000); # extra
+    printf($fh "extra:\n  - %d\n  - \"install/solana-accounts/accounts.yaml.gz\"\n", 10000); # extra
 
     close($fh);
 }
@@ -230,8 +229,7 @@ sub deploy_solana
 
     $proc = $RUNNER->run(
 	$genworker,
-	[ 'deploy-solana-worker', 'generate', $NODEFILE_LOC ,
-	  150000 ]
+	[ 'deploy-solana-worker', 'generate', $NODEFILE_LOC, 'install/solana-accounts/accounts.yaml' ]
 	);
     if ($proc->wait() != 0) {
 	die ("failed to generate solana testnet");
@@ -239,22 +237,20 @@ sub deploy_solana
 
     # Fetch and dispatch generated testnet
 
-    $proc = $genworker->recv([ $NETWORK_LOC ], TARGET => $MINION_PRIVATE);
+    $proc = $genworker->recv([ $NETWORK_LOC . '.tar.gz' ], TARGET => $MINION_PRIVATE);
     if ($proc->wait() != 0) {
 	die ("cannot receive solana testnet from worker");
     }
 
-    $proc = $genworker->recv([ $ACCOUNTS_LOC ], TARGET => $DATA_DIR);
-    if ($proc->wait() != 0) {
-	die ("cannot receive solana accounts from worker");
-    }
+    system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
+	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
     build_chainfile($CHAIN_PATH, $nodes);
 
     dispatch($nodes, $NETWORK_PATH);
 
     $genworker->execute(
-	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC, $ACCOUNTS_LOC ]
+	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC . '.tar.gz' ]
 	)->wait();
 
 

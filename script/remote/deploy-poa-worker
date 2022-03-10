@@ -154,6 +154,12 @@ generate() {
 
     setup_environment
 
+	if [ ! -d "${netroot}" ] ; then
+	mkdir -p "${netroot}"
+    fi
+
+	tar --directory="${netroot}" -xzf "${deploy_root}/network.tar.gz"
+
     tmp="$(mktemp -d --suffix='.d')"
 
     # Make sure that there is no cached puppet configuration.
@@ -197,6 +203,19 @@ generate() {
 
 	echo 'yes'       # pre-fund precompile-addresses
 	echo '10'        # set network id to 10
+
+	echo '2'
+	echo '1'
+	echo '0'
+	echo '0'
+	echo '0'
+	echo '0'
+	echo '0'
+	echo '0'
+	echo '0'
+	echo '0'
+	echo '0'
+	echo '0'
 
 	echo '2'         # manage existing genesis
 	echo '2'         # export genesis configuration

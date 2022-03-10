@@ -241,10 +241,13 @@ sub deploy_quorum_ibft
 
     # Fetch and dispatch generated testnet
 
-    $proc = $genworker->recv([ $NETWORK_LOC ], TARGET => $MINION_PRIVATE);
+    $proc = $genworker->recv([ $NETWORK_LOC . '.tar.gz' ], TARGET => $MINION_PRIVATE);
     if ($proc->wait() != 0) {
 	die ("cannot receive quorum-ibft testnet from worker");
     }
+
+    system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
+	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
     build_chainfile($CHAIN_PATH, $nodes);
 
@@ -259,7 +262,7 @@ sub deploy_quorum_ibft
     }
 
     $genworker->execute(
-	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC ]
+	[ 'rm', '-rf', $NODEFILE_LOC, $NETWORK_LOC . '.tar.gz' ]
 	)->wait();
 
 

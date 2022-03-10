@@ -38,11 +38,32 @@ setup_environment() {
     fi
 }
 
+waitForNodeToInit() {
+	local port="$1" ; shift
+    local waitTime="$1" ; shift
+    local addr="$1" ; shift
+
+	echo "--- waiting for $port"
+	declare startTime=$SECONDS
+	while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' http://localhost:$port/)" != "200" ]]; do
+	declare timeWaited=$((SECONDS - startTime))
+	if [[ $timeWaited -ge $waitTime ]]; then
+		echo "^^^ +++"
+		echo "Error: $port not ready in $timeWaited seconds for $addr"
+		nkill
+		exit 1
+	fi
+	echo "Waiting for $port ($timeWaited)..."
+	sleep 5
+	done
+	echo "$port ready"
+}
+
 
 # Actions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 start() {
-    local dir pid port raftport wscport
+    local dir pid addr port raftport wsport rpcport
 
     if [ $# -gt 0 ] ; then
 	fatal "unexpected operand '$1'"
@@ -55,6 +76,7 @@ start() {
 	    port="$(cat "${dir}/port")"
 	    raftport="$(cat "${dir}/raftport")"
 	    wsport="$(cat "${dir}/wsport")"
+	    rpcport="$(cat "${dir}/rpcport")"
 
 	    if ! echo "${port}" | grep -Pq '^\d+$' ; then
 		fatal "cannot find port in '${dir}/port'"
@@ -68,10 +90,14 @@ start() {
 		fatal "cannot find ws port in '${dir}/wsport'"
 	    fi
 
+		if ! echo "${rpcport}" | grep -Pq '^\d+$' ; then
+		fatal "cannot find rpc port in '${dir}/rpcport'"
+	    fi
+
 	    geth --datadir "${dir}" \
 		 --allow-insecure-unlock \
 		 --nodiscover \
-		 --verbosity 5 \
+		 --verbosity 2 \
 		 --networkid 10 \
 		 --raft \
 		 --raftport ${raftport} \
@@ -79,6 +105,9 @@ start() {
 		 --ws.addr 0.0.0.0 \
 		 --ws.port ${wsport} \
 		 --ws.api admin,db,eth,debug,miner,net,shh,txpool,personal,web3,quorum,raft \
+		 --http \
+		 --http.addr 0.0.0.0 \
+		 --http.port ${rpcport} \
 		 --emitcheckpoints \
 		 --port ${port} \
 		 > "${dir}/out" 2> "${dir}/err" &
@@ -87,6 +116,14 @@ start() {
 	    echo ${pid} > "${dir}/pid"
 	fi
     done
+
+	for dir in "${deploy_root}/n"* ; do
+	if [ -d "${dir}" ] ; then
+		addr="$(cat "${dir}/addr")"
+	    rpcport="$(cat "${dir}/rpcport")"
+		waitForNodeToInit ${rpcport} 120 "${addr}"
+	fi
+	done
 
     sleep 2
 }

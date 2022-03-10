@@ -78,7 +78,7 @@ start_primary() {
 
     diablo primary \
         --config="${deploy_root}/workload.yaml"\
-        --chain-config="${deploy_root}/chain.yaml" \
+        --chain-config="${dir}/chain.yaml" \
 	--addr="0.0.0.0:${port}" \
 	--level='DEBUG' \
 	> "${dir}/out" \

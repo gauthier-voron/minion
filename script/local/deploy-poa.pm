@@ -24,6 +24,8 @@ my $PRIVATE = $ENV{MINION_PRIVATE};     # Directory specific to this script
 #
 my $ROLES_PATH = $PUBLIC . '/behaviors.txt';
 
+my $NETWORK_NAME = 'network';
+
 # Geth accounts (address and private key) generated at install time.
 # These files are on the remote nodes.
 #
@@ -197,6 +199,8 @@ sub gather_accounts
 	die ('cannot prepare deployment on workers');
     }
 
+    system('tar', '--directory=' . $dest , '-czf', $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz', '.');
+
     return $dest;
 }
 
@@ -209,7 +213,7 @@ sub generate_genesis
     $input = $DEPLOY_PATH . '/network';
     $output = $DEPLOY_PATH . '/genesis.json';
 
-    if ($worker->send([ $accounts ], TARGET => $input)->wait() != 0) {
+    if ($worker->send([ $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz' ], TARGET => $DEPLOY_PATH . '/' )->wait() != 0) {
 	die ('cannot send accounts to worker');
     }
 
@@ -316,7 +320,7 @@ sub setup_network
 	$fleet->send([ $statics ], TARGETS => $input)->waitall()) {
 	die ('cannot send statics to workers');
     }
-    
+
     $cmd = [ 'deploy-poa-worker' , 'finalize' , $input ];
     if ($RUNNER->run($fleet, $cmd)->wait() != 0) {
 	die ('cannot finalize testnet configuration');

@@ -3,7 +3,7 @@ package deploy_algorand;
 use strict;
 use warnings;
 
-# use File::Copy;
+use File::Temp qw(tempfile);
 
 use Minion::System::Pgroup;
 
@@ -29,18 +29,18 @@ my $SPEC_WORKLOAD_PATH = $PRIVATE . '/workload.yaml';
 
 
 my $DEPLOY = 'deploy/diablo';
+my $CHAIN_PRIMARY_LOC = $DEPLOY . '/primary/chain.yaml';
 my $CHAIN_LOC = $DEPLOY . '/chain.yaml';
 my $WORKLOAD_LOC = $DEPLOY . '/workload.yaml';
 my $KEYS_LOC = $DEPLOY . '/keys.json';
-my $ACCOUNTS_LOC = $DEPLOY . '/accounts.yaml.gz';
 
 
 my $ALGORAND_CHAINCONFIG_PATH = $SHARED . '/algorand-chain.yml';
+my $LIBRA_CHAIN_PATH = $SHARED . '/libra/chain.yaml';
 my $POA_CHAIN_PATH = $SHARED . '/poa/chain.yaml';
 my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
 my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
 my $SOLANA_CHAIN_PATH = $SHARED . '/solana/chain.yaml';
-my $SOLANA_ACCOUNTS_PATH = $SHARED . '/solana/accounts.yaml.gz';
 my $AVALANCHE_CHAIN_PATH = $SHARED . '/avalanche/chain.yaml';
 
 
@@ -131,20 +131,72 @@ sub get_nodes
 }
 
 
-sub deploy_diablo_file
+sub grep_region_chain
 {
-    my ($nodes, $primary, $secondaries, $file, $file_loc) = @_;
-    my ($worker, @procs, $proc, @stats);
+    my ($chain, $worker) = @_;
+    my ($wregion, $member, @allowed, $rfh, $line, $ip, $wfh, $path);
 
-    foreach $worker (map { $_->{'worker'} } values(%$nodes)) {
-	$proc = $worker->send([ $file ], TARGET => $file_loc);
-	push(@procs, $proc);
+    $wregion = $worker->region();
+
+    foreach $member ($FLEET->members()) {
+	if ($member->region() ne $wregion) {
+	    next;
+	}
+	push(@allowed, $member->public_ip());
+    }
+
+    ($wfh, $path) = tempfile(DIR => $PRIVATE);
+
+    if (!open($rfh, '<', $chain)) {
+	die ("cannot grep '$chain'");
+    }
+
+    while (defined($line = <$rfh>)) {
+	chomp($line);
+
+	if ($line =~ /^  - (\d+\.\d+\.\d+\.\d+):\d+$/) {
+	    $ip = $1;
+
+	    if (!grep { $ip eq $_ } @allowed) {
+		next;
+	    }
+	}
+
+	printf($wfh "%s\n", $line);
+    }
+
+    close($rfh);
+    close($wfh);
+
+    return $path;
+}
+
+sub deploy_diablo_chain
+{
+    my ($nodes, $primary, $secondaries, $chain) = @_;
+    my ($node, @procs, $proc, @stats, $tchain);
+
+    foreach $node (values(%$nodes)) {
+	if ($node->{'primary'} > 0) {
+	    $proc = $node->{'worker'}->send(
+		[ $chain ],
+		TARGET => $CHAIN_PRIMARY_LOC);
+	    push(@procs, $proc);
+	}
+
+	if ($node->{'secondaries'} > 0) {
+	    $tchain = grep_region_chain($chain, $node->{'worker'});
+	    $proc = $node->{'worker'}->send(
+		[ $tchain ],
+		TARGET => $CHAIN_LOC);
+	    push(@procs, $proc);
+	}
     }
 
     @stats = Minion::System::Pgroup->new(\@procs)->waitall();
 
     if (grep { $_->exitstatus() != 0 } @stats) {
-	die ("cannot send algorand file on workers");
+	die ("cannot send algorand chain configuration on workers");
     }
 
     return 1;
@@ -152,32 +204,37 @@ sub deploy_diablo_file
 
 sub deploy_diablo_algorand
 {
-    return deploy_diablo_file(@_, $ALGORAND_CHAINCONFIG_PATH, $CHAIN_LOC);
+    return deploy_diablo_chain(@_, $ALGORAND_CHAINCONFIG_PATH);
+}
+
+sub deploy_diablo_libra
+{
+    return deploy_diablo_chain(@_, $LIBRA_CHAIN_PATH);
 }
 
 sub deploy_diablo_poa
 {
-    return deploy_diablo_file(@_, $POA_CHAIN_PATH, $CHAIN_LOC);
+    return deploy_diablo_chain(@_, $POA_CHAIN_PATH);
 }
 
 sub deploy_diablo_quorum_ibft
 {
-    return deploy_diablo_file(@_, $QUORUMIBFT_CHAIN_PATH, $CHAIN_LOC);
+    return deploy_diablo_chain(@_, $QUORUMIBFT_CHAIN_PATH);
 }
 
 sub deploy_diablo_quorum_raft
 {
-    return deploy_diablo_file(@_, $QUORUMRAFT_CHAIN_PATH, $CHAIN_LOC);
+    return deploy_diablo_chain(@_, $QUORUMRAFT_CHAIN_PATH);
 }
 
 sub deploy_diablo_solana
 {
-    return deploy_diablo_file(@_, $SOLANA_CHAIN_PATH, $CHAIN_LOC) && deploy_diablo_file(@_, $SOLANA_ACCOUNTS_PATH, $ACCOUNTS_LOC);
+    return deploy_diablo_chain(@_, $SOLANA_CHAIN_PATH);
 }
 
 sub deploy_diablo_avalanche
 {
-    return deploy_diablo_file(@_, $AVALANCHE_CHAIN_PATH, $CHAIN_LOC);
+    return deploy_diablo_chain(@_, $AVALANCHE_CHAIN_PATH);
 }
 
 
@@ -279,6 +336,10 @@ sub deploy_diablo
 	return deploy_diablo_algorand($nodes, $primary, \@secondaries);
     }
 
+    if (-f $LIBRA_CHAIN_PATH) {
+	return deploy_diablo_libra($nodes, $primary, \@secondaries);
+    }
+
     if (-f $POA_CHAIN_PATH) {
 	return deploy_diablo_poa($nodes, $primary, \@secondaries);
     }
@@ -291,7 +352,7 @@ sub deploy_diablo
 	return deploy_diablo_quorum_raft($nodes, $primary, \@secondaries);
     }
 
-	if (-f $SOLANA_CHAIN_PATH && -f $SOLANA_ACCOUNTS_PATH) {
+	if (-f $SOLANA_CHAIN_PATH) {
 	return deploy_diablo_solana($nodes, $primary, \@secondaries);
     }
 

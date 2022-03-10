@@ -9,16 +9,21 @@ llvm_url='https://github.com/solana-labs/llvm-project.git'
 llvm_checkout='solana-rustc/13.0-2021-08-08'
 
 solang_url='https://github.com/hyperledger-labs/solang.git'
-solang_checkout='v0.1.9'
+solang_checkout='v0.1.10'
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
     exit 1
 fi
 
+while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ; do
+    echo 'Waiting for release of dpkg/apt locks'
+    sleep 5
+done
+
 # Install common utilities.
 #
-sudo -n apt-get install -yy 'cmake' 'gcc' 'g++' 'git' 'ninja-build' 'make' 'cargo'
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'cmake' 'gcc' 'g++' 'git' 'ninja-build' 'make' 'cargo'
 
 # Create an install dir if not already there.
 #
@@ -26,11 +31,15 @@ if [ ! -e 'install' ] ; then
     mkdir 'install'
 fi
 
+if [ -e 'install/solang' ] ; then
+    sudo rm -rf 'install/solang'
+fi
+
 arch=$(uname -m)
 if [[ $arch = x86_64 ]]; then
     mkdir -p 'install/solang/target/release'
 
-    curl -L "https://github.com/hyperledger-labs/solang/releases/download/${solang_checkout}/solang-linux" -o 'install/solang/target/release/solang'
+    curl -L "https://github.com/hyperledger-labs/solang/releases/download/${solang_checkout}/solang-linux-x86-64" -o 'install/solang/target/release/solang'
 
     chmod +x 'install/solang/target/release/solang'
 

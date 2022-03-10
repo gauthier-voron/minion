@@ -9,20 +9,23 @@ golang_url="https://go.dev/dl/go1.16.8.linux-$(dpkg --print-architecture).tar.gz
 
 avalanche_url='https://github.com/ava-labs/avalanchego'
 avalanche_checkout='master'
-# remove when eth_gasPrice is fixed
-export CORETH_VERSION=v0.8.0-rc.2
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
     exit 1
 fi
 
+while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ; do
+    echo 'Waiting for release of dpkg/apt locks'
+    sleep 5
+done
+
 # Install common utilities as well as golang 1.16.8.
 # This specific version of golang is required by Avalanche.
 # We install it along the standard golang version and add it to the PATH when
 # building Avalanche.
 #
-sudo -n apt-get install -yy 'git' 'make' 'gcc' 'g++'
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' 'gcc' 'g++'
 curl -L "${golang_url}" | tar --one-top-level='install/go1.16.8' --strip-components=1 -xzf -
 export PATH="${PWD}/install/go1.16.8/bin:${PATH}"
 
@@ -47,8 +50,269 @@ git clone "${avalanche_url}" 'install/avalanche'
     export GOPATH="${PWD}/go"
 
     ./scripts/build.sh
+)
 
-    # net_version workaround
-    sudo sed -i '316i ethConfig.NetworkId = vm.chainID.Uint64()' './go/pkg/mod/github.com/ava-labs/coreth@v0.8.0-rc.2/plugin/evm/vm.go'
-    ./scripts/build.sh
+mkdir 'install/avalanche/avalanche-tools'
+(
+    cd 'install/avalanche/avalanche-tools'
+
+    cat > 'main.go' <<'EOF'
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"math/big"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ava-labs/avalanche-network-runner/network"
+	"github.com/ava-labs/avalanche-network-runner/utils"
+	"github.com/ava-labs/avalanchego/genesis"
+	"github.com/ava-labs/avalanchego/ids"
+	"github.com/ava-labs/avalanchego/utils/constants"
+	"github.com/ava-labs/avalanchego/utils/logging"
+)
+
+type Config struct {
+	NetworkId                 string `json:"network-id"`
+	PublicIp                  string `json:"public-ip"`
+	StakingPort               uint   `json:"staking-port"`
+	HttpHost                  string `json:"http-host"`
+	HttpPort                  uint   `json:"http-port"`
+	StakingTlsCertFileContent []byte `json:"staking-tls-cert-file-content"`
+	StakingTlsKeyFileContent  []byte `json:"staking-tls-key-file-content"`
+	GenesisContent            []byte `json:"genesis-content"`
+	BootstrapIds              string `json:"bootstrap-ids"`
+	BootstrapIps              string `json:"bootstrap-ips"`
+	LogLevel                  string `json:"log-level,omitempty"`
+}
+
+type CConfig struct {
+	LogLevel string `json:"log-level,omitempty"`
+}
+
+func NewCertAndKeyBytes() ([]byte, []byte, error) {
+	// Create key to sign cert with
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("couldn't generate ed25519 key: %w", err)
+	}
+
+	// Create self-signed staking cert
+	certTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(0),
+		NotBefore:             time.Date(2000, time.January, 0, 0, 0, 0, 0, time.UTC),
+		NotAfter:              time.Now().AddDate(100, 0, 0),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageDataEncipherment,
+		BasicConstraintsValid: true,
+	}
+	certBytes, err := x509.CreateCertificate(rand.Reader, certTemplate, certTemplate, &key.PublicKey, key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("couldn't create certificate: %w", err)
+	}
+	var certBuff bytes.Buffer
+	if err := pem.Encode(&certBuff, &pem.Block{Type: "CERTIFICATE", Bytes: certBytes}); err != nil {
+		return nil, nil, fmt.Errorf("couldn't write cert file: %w", err)
+	}
+
+	privBytes, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("couldn't marshal private key: %w", err)
+	}
+
+	var keyBuff bytes.Buffer
+	if err := pem.Encode(&keyBuff, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
+		return nil, nil, fmt.Errorf("couldn't write private key: %w", err)
+	}
+
+	return certBuff.Bytes(), keyBuff.Bytes(), nil
+}
+
+func main() {
+	fmt.Printf("Start generator, args %v\n", os.Args)
+	netroot := os.Args[1]
+	nodefile, err := os.Open(os.Args[2])
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer nodefile.Close()
+	keyfile, err := os.Open(os.Args[3])
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer keyfile.Close()
+
+	configs := make([]Config, 0)
+	networkID := uint32(1337)
+	baseConfig := Config{
+		NetworkId: fmt.Sprintf("network-%d", networkID),
+		//LogLevel:  "debug",
+	}
+	cConfig := CConfig{
+		//LogLevel: "trace",
+	}
+
+	genesisVdrs := make([]ids.ShortID, 0)
+	scanner := bufio.NewScanner(nodefile)
+	for scanner.Scan() {
+		tokens := strings.Split(scanner.Text(), ":")
+		fmt.Printf("Processing node %v\n", tokens)
+		crt, key, err := NewCertAndKeyBytes()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		nodeID, err := utils.ToNodeID(key, crt)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		genesisVdrs = append(genesisVdrs, nodeID)
+
+		config := baseConfig
+		config.PublicIp = tokens[0]
+		config.HttpHost = "0.0.0.0"
+		httpPort, err := strconv.Atoi(tokens[1])
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		config.HttpPort = uint(httpPort)
+		stakingPort, err := strconv.Atoi(tokens[2])
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		config.StakingPort = uint(stakingPort)
+		config.StakingTlsCertFileContent = crt
+		config.StakingTlsKeyFileContent = key
+		if len(genesisVdrs) == 1 {
+			baseConfig.BootstrapIds = nodeID.PrefixedString(constants.NodeIDPrefix)
+			baseConfig.BootstrapIps = fmt.Sprintf("%s:%s", tokens[0], tokens[2])
+		}
+		configs = append(configs, config)
+	}
+
+	cChainBalances := make([]network.AddrAndBalance, 0)
+	scanner = bufio.NewScanner(keyfile)
+	for scanner.Scan() {
+		tokens := strings.Split(scanner.Text(), ":")
+		addr, err := hex.DecodeString(tokens[0])
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		id, err := ids.ToShortID(addr)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		cChainBalances = append(cChainBalances, network.AddrAndBalance{
+			Addr:    id,
+			Balance: 0x1337133713371337,
+		})
+	}
+
+	genesisBytes, err := network.NewAvalancheGoGenesis(
+		logging.NoLog{},
+		networkID,
+		nil,
+		cChainBalances,
+		genesisVdrs,
+	)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	genesisBytes = bytes.ReplaceAll(
+		genesisBytes,
+		[]byte("0x1337133713371337"),
+		[]byte("0x6d79f82328ea3da61e066ebb2f88a000000000000"),
+	)
+
+	// Enable Apricot upgrades
+	var genesisConfig genesis.UnparsedConfig
+	err = json.Unmarshal(genesisBytes, &genesisConfig)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	var cChainConfig map[string]interface{}
+	err = json.Unmarshal([]byte(genesisConfig.CChainGenesis), &cChainConfig)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	blockConfig := cChainConfig["config"].(map[string]interface{})
+	blockConfig["apricotPhase3BlockTimestamp"] = 0
+	blockConfig["apricotPhase4BlockTimestamp"] = 0
+	blockConfig["apricotPhase5BlockTimestamp"] = 0
+	cChainConfig["config"] = blockConfig
+	cChainConfigBytes, err := json.Marshal(cChainConfig)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	genesisConfig.CChainGenesis = string(cChainConfigBytes)
+	genesisBytes, err = json.Marshal(genesisConfig)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	for i, config := range configs {
+		dir := fmt.Sprintf("%s/n%d/.%s", netroot, i, constants.AppName)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		err = os.MkdirAll(fmt.Sprintf("%s/configs/chains/C", dir), 0755)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		config.GenesisContent = genesisBytes
+		configJson, err := json.Marshal(config)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		os.WriteFile(fmt.Sprintf("%s/config.json", dir), configJson, 0644)
+		cConfigJson, err := json.Marshal(cConfig)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		err = os.WriteFile(fmt.Sprintf("%s/configs/chains/C/config.json", dir), cConfigJson, 0644)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}
+}
+EOF
+    chmod 755 'main.go'
+
+    export GOPATH="${PWD}/go"
+
+    go mod init "avalanche-tools"
+
+    go get github.com/ava-labs/avalanche-network-runner@1d61e94
+
+    go mod tidy
+
+    go build -o avalanche
 )

@@ -12,6 +12,7 @@ use IO::Select;
 use Minion::Aws;
 use Minion::Aws::Fleet;
 use Minion::Aws::Image;
+use Minion::Aws::Instance;
 use Minion::Run::Runner;
 use Minion::StaticFleet;
 
@@ -24,34 +25,47 @@ my $PREPARE_DESCRIPTION = "Benchmark image for OSDI'22";
 my $PREPARE_DISK = 32;
 my $PREPARE_REGION = 'eu-central-1';
 my $PREPARE_KEY = 'default';
-my $PREPARE_NAME = 'minion-osdi22';
-my $PREPARE_SIZE = 50;
+my $PREPARE_NAME = 'minion-avalanche-solana';
+my $PREPARE_SIZE = 10;
 my $PREPARE_SECGROUP = 'default';
-my $PREPARE_TYPE = 'c5.xlarge';
+my $PREPARE_TYPE = 'c5.9xlarge';
 my $PREPARE_USER = 'ubuntu';
 my @PREPARE_REGIONS = qw(
     af-south-1
+    ap-east-1
     ap-northeast-1
+    ap-northeast-2
+    ap-northeast-3
     ap-south-1
+    ap-southeast-1
     ap-southeast-2
+    ca-central-1
+    eu-central-1
     eu-north-1
     eu-south-1
+    eu-west-1
+    eu-west-2
+    eu-west-3
     me-south-1
     sa-east-1
+    us-east-1
     us-east-2
+    us-west-1
     us-west-2
 );
 my @PREPARE_ALLINSTALLS = (
     [ 'install-geth-accounts', '--number=10000' ]
 );
 my @PREPARE_INSTALLS = (
-    [ 'install-algorand' ],
-    [ 'install-diablo'   ],
-    [ 'install-poa'      ],
-    [ 'install-quorum'   ],
-    [ 'install-solang'   ],
-    [ 'install-solana'   ],
-    [ 'install-solidity' ]
+    [ 'install-algorand'  ],
+    [ 'install-avalanche' ],
+    [ 'install-diablo'    ],
+    [ 'install-libra'     ],
+    [ 'install-poa'       ],
+    [ 'install-quorum'    ],
+    [ 'install-solang'    ],
+    [ 'install-solana'    ],
+    [ 'install-solidity'  ]
 );
 
 
@@ -61,13 +75,12 @@ my $BOOT_KEY      = $PREPARE_KEY;
 my $BOOT_SIZE     = 5;
 my $BOOT_DURATION = 36000;
 my $BOOT_SECGROUP = 'default';
-my $BOOT_TYPE     = 'c5.xlarge';
+my $BOOT_TYPE     = 'c5.4xlarge';
 my $BOOT_DISK     = undef;
 my @BOOT_INSTALLS = ();
 my @BOOT_REGIONS  = @PREPARE_REGIONS;
 
 
-my $RUN_SIZE = undef;
 my $RUN_SYNC = undef;
 my $RUN_USER = $BOOT_USER;
 my $RUN_RESULT = sub {
@@ -80,7 +93,7 @@ my $RUN_RESULT = sub {
 		   $year, $mon, $day, $hour, $min, $sec);
 };
 my @RUN_INSTALLS = ();
-my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa solana);
+my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa libra solana avalanche);
 my @RUN_BREAKPOINTS = qw(boot install sync deploy chain benchmark);
 
 
@@ -181,39 +194,43 @@ sub _run
     }
 
     foreach $region (keys(%$fids)) {
-	$fleet = Minion::Aws::Fleet->new(
-	    $fids->{$region},
-	    LOG    => \&cmdlog,
-	    REGION => $region,
-	    USER   => $params{USER}
-	    );
+	if ($fids->{$region} =~ /^sfr-/) {
+	    $fleet = Minion::Aws::Fleet->new(
+		$fids->{$region},
+		LOG    => \&cmdlog,
+		REGION => $region,
+		USER   => $params{USER}
+		);
 
-	if (defined($params{SIZE})) {
-	    if (scalar($fleet->members()) < $params{SIZE}) {
-		fatal("fleet '%s' in '%s' does not have %d instances " .
-		      "(only %d)", $fleet->id(), $region, $params{SIZE},
-		      scalar($fleet->members()));
-	    }
-
-	    $fleet = Minion::StaticFleet->new([
-		($fleet->members())[0 .. ($params{SIZE} - 1)]
-	    ]);
-
-	    message("using %d-subset of '%s' in '%s'", $params{SIZE},
-		    $fids->{$region}, $region);
-	} else {
-	    message("using '%s' in '%s'", $fids->{$region}, $region);
+	    $fleets{$region} = $fleet;
+	    next;
 	}
 
-	$fleets{$region} = $fleet;
+	if ($fids->{$region} =~ /^\d+\.\d+\.\d+\.\d+/) {
+	    $fleet = Minion::StaticFleet->new([
+		map {
+		    Minion::Aws::Instance->new(
+			'i-00000000000', $_, $_, 'sfr-00000000000',
+			LOG    => \&cmdlog,
+			REGION => $region,
+			USER   => $params{USER}
+			);
+		} split(',', $fids->{$region})
+	    ]);
+
+	    $fleets{$region} = $fleet;
+	    next;
+	}
     }
 
     $pgrp = Minion::System::Pgroup->new([]);
 
     foreach $region (keys(%fleets)) {
-	message("fetching '%s' in '%s'", $fids->{$region}, $region);
-	$proc = $fleets{$region}->instances();
-	$pgrp->add($proc);
+	if ($fleets{$region}->can('instances')) {
+	    message("fetching '%s' in '%s'", $fids->{$region}, $region);
+	    $proc = $fleets{$region}->instances();
+	    $pgrp->add($proc);
+	}
     }
 
     map { $_->get() } $pgrp->waitall();
@@ -533,7 +550,7 @@ sub _run
 sub run
 {
     my ($chain, $workload, @ids);
-    my (@breakpoints, @installs, $result, $size, $sync, $user);
+    my (@breakpoints, @installs, $result, $sync, $user);
     my ($id, %fids, $breakpoint);
 
     GetOptionsFromArray(
@@ -541,7 +558,6 @@ sub run
 	'b|breakpoint=s' => \@breakpoints,
 	'i|install=s'    => \@installs,
 	'r|result=s'     => \$result,
-	's|size=s'       => \$size,
 	'S|sync=s'       => \$sync,
 	'u|user=s'       => \$user,
 	'v|verbose'      => sub { $VERBOSE += 1; }
@@ -560,11 +576,17 @@ sub run
     }
 
     foreach $id (@ids) {
-	if ($id !~ /^(sfr(?:-[0-9a-f]+)+)@(..-[^-]+-\d+)$/) {
-	    fatal("invalid id operand: '%s'", $id);
+	if ($id =~ /^(sfr(?:-[0-9a-f]+)+)@(..-[^-]+-\d+)$/) {
+	    $fids{$2} = $1;
+	    next;
 	}
 
-	$fids{$2} = $1;
+	if ($id =~ /^(\d+\.\d+\.\d+\.\d+(?:,\d+\.\d+\.\d+\.\d+)*)@(..-[^-]+-\d+)$/) {
+	    $fids{$2} = $1;
+	    next;
+	}
+
+	fatal("invalid id operand: '%s'", $id);
     }
 
     if (scalar(@breakpoints) > 0) {
@@ -588,14 +610,6 @@ sub run
 	$result .= '/' . $RUN_RESULT->();
     }
 
-    if (!defined($size)) {
-	$size = $RUN_SIZE;
-    } elsif ($size !~ /^\d+$/) {
-	fatal("invalid value '%s' for option '--size'", $size);
-    } elsif ($size <= 1) {
-	fatal("too small value (%d) for option '--size'", $size);
-    }
-
     if (!defined($sync)) {
 	$sync = $RUN_SYNC;
     }
@@ -609,7 +623,6 @@ sub run
 	BREAKPOINTS => \@breakpoints,
 	INSTALLS    => \@installs,
 	RESULT      => $result,
-	SIZE        => $size,
 	SYNC        => $sync,
 	USER        => $user
 	);
@@ -665,7 +678,7 @@ sub _boot
 	    $params{TYPE},
 	    KEY      => $params{KEY},
 	    LOG      => \&cmdlog,
-	    PRICE    => 1.0,
+	    PRICE    => 2.0,
 	    REGION   => $region,
 	    SECGROUP => $secgroups->{$region},
 	    SIZE     => $params{SIZE},
@@ -766,7 +779,7 @@ sub _boot
 	$out = '';
 	$err = '';
 	$proc = $runner->run(
-	    $fleet, $job,
+	    $gfleet, $job,
 	    STDOUT  => runlog(\$out), STDERR  => runlog(\$err),
 	    STDOUTS => runlog(\$out), STDERRS => runlog(\$err)
 	    );

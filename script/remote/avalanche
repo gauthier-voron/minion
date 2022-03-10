@@ -86,7 +86,7 @@ start() {
 
     for dir in "${deploy_root}/n"* ; do
 	if [ -d "${dir}" ] ; then
-		waitForNodeToInit "$(grep -oP '(?<="http-port":)[^,]*' ${dir}/.avalanchego/config.json)" 60
+		waitForNodeToInit "$(grep -oP '(?<="http-port":)[^,]*' ${dir}/.avalanchego/config.json)" 120
 	fi
 	done
 

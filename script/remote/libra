@@ -2,9 +2,9 @@
 
 set -e
 
-script_name='quorum-ibft'
-install_root="${HOME}/install/quorum"
-deploy_root="${HOME}/deploy/quorum-ibft"
+script_name='poa'
+install_root="${HOME}/install/libra"
+deploy_root="${HOME}/deploy/libra"
 
 
 # Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -28,18 +28,13 @@ fatal() {
 
 setup_environment() {
     if [ ! -e "${install_root}" ] ; then
-	fatal "cannot find quorum install at '${install_root}'"
+	fatal "cannot find libra install at '${install_root}'"
     fi
 
-    export PATH="${install_root}/build/bin:${PATH}"
-    export PATH="${install_root}/istanbul-tools/build/bin:${PATH}"
+    export PATH="${install_root}/target/release:${PATH}"
 
-    if ! command -v 'geth' > '/dev/null' 2> '/dev/null' ; then
-	fatal "cannot find geth executable in '${install_root}'"
-    fi
-
-    if ! command -v 'istanbul' > '/dev/null' 2> '/dev/null' ; then
-	fatal "cannot find istanbul executable in '${install_root}'"
+    if ! command -v 'diem-node' > '/dev/null' 2> '/dev/null' ; then
+	fatal "cannot find diem-node executable in '${install_root}'"
     fi
 }
 
@@ -47,58 +42,34 @@ setup_environment() {
 # Actions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 start() {
-    local dir pid port rpcport
+    local dir pid port wsport address
 
     if [ $# -gt 0 ] ; then
 	fatal "unexpected operand '$1'"
     fi
 
+    ulimit -n 65535
+
     export PRIVATE_CONFIG=ignore
 
-    for dir in "${deploy_root}/n"* ; do
+    for dir in "${deploy_root}/"* ; do
 	if [ -d "${dir}" ] ; then
-	    port="$(cat "${dir}/port")"
-	    rpcport="$(cat "${dir}/rpcport")"
-
-	    if ! echo "${port}" | grep -Pq '^\d+$' ; then
-		fatal "cannot find port in '${dir}/port'"
-	    fi
-
-	    if ! echo "${rpcport}" | grep -Pq '^\d+$' ; then
-		fatal "cannot find rpc port in '${dir}/rpcport'"
-	    fi
-
-	    geth --datadir "${dir}" \
-		 --allow-insecure-unlock \
-		 --nodiscover \
-		 --istanbul.blockperiod 5 \
-		 --syncmode full \
-		 --mine \
-		 --miner.threads 1 \
-		 --verbosity 2 \
-		 --networkid 10 \
-		 --ws \
-		 --ws.addr 0.0.0.0 \
-		 --ws.port "${rpcport}" \
-		 --ws.api admin,eth,debug,miner,net,txpool,personal,web3,istanbul \
-		 --ws.origins "*" \
-		 --emitcheckpoints \
-		 --port "${port}" \
-		 > "${dir}/out" 2> "${dir}/err" &
+	    diem-node --config "${dir}/node.yaml" \
+		      > "${dir}/out" 2> "${dir}/err" &
 	    pid=$!
 
 	    echo ${pid} > "${dir}/pid"
 	fi
     done
 
-    sleep 10
+    sleep 2
 }
 
 _kill() {
     local sig="$1" ; shift
     local dir pid dead
 
-    for dir in "${deploy_root}/n"* ; do
+    for dir in "${deploy_root}/"* ; do
 	if [ ! -d "${dir}" ] ; then
 	    continue
 	elif [ ! -f "${dir}/pid" ] ; then
