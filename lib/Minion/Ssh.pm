@@ -15,7 +15,7 @@ use Minion::Worker;
 sub _init
 {
     my ($self, $addr, %opts) = @_;
-    my (@sshcmd, @scpcmd, $value, $port, $logcode, %aliases);
+    my (@sshcmd, @scpcmd, $value, $port, $logcode, %aliases, $ctrlpath);
 
     confess() if (!defined($addr));
     confess() if (ref($addr) ne '');
@@ -67,10 +67,16 @@ sub _init
 
     @sshcmd = ( 'ssh' , '-T' , '-o' , 'StrictHostKeyChecking=no' , '-o'
 	      , 'UserKnownHostsFile=/dev/null' , '-o' , 'LogLevel=ERROR'
+	      , '-o', 'ControlMaster=auto', '-o', 'ControlPersist=60',
+	      , '-o', 'ControlPath=/tmp/minion-ssh.' . $addr . ':' . $port .
+		'.sock'
 	      , '-p' , $port , $addr );
     @scpcmd = ( 'scp' , '-q' , '-o' , 'StrictHostKeyChecking=no' , '-o'
 	      , 'UserKnownHostsFile=/dev/null' , '-o' , 'LogLevel=ERROR'
-	      , '-r', '-P', $port, $addr );
+	      , '-o', 'ControlMaster=auto', '-o', 'ControlPersist=60',
+	      , '-o', 'ControlPath=/tmp/minion-ssh.' . $addr . ':' . $port .
+		'.sock'
+	      , '-r', '-C', '-P', $port, $addr );
 
     $self->{__PACKAGE__()}->{_scpcmd} = \@scpcmd;
     $self->{__PACKAGE__()}->{_sshcmd} = \@sshcmd;
