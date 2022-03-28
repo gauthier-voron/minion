@@ -177,7 +177,45 @@ sub execute
 
     $self->_log(join(' ', @$ecmd));
 
-    return Minion::System::Process->new($ecmd, %popts);
+    return Minion::System::Process->new(sub {
+	my ($retry, $ret, $err);
+
+	$retry = 5;
+
+	while ($retry > 0) {
+	    $err = '';
+
+	    $ret = Minion::System::Process->new(
+		$ecmd, STDERR => sub {
+		    return if (!defined($_[0]));
+		    printf(STDERR "%s", $_[0]);
+		    $err .= $_[0];
+		    if (length($err) > 128) {
+			$err = substr($err, length($err) - 128);
+		    }
+	    })->wait();
+
+	    $retry -= 1;
+
+	    if ($ret == 0) {
+		exit (0);
+	    }
+
+	    if ($err =~ m|\n?kex_exchange_identification: Connection|) {
+		printf(STDERR "retry (%d remaining)\n", $retry);
+		next;
+	    }
+
+	    if ($err =~ m|\n?lost connection\n?|) {
+		printf(STDERR "retry (%d remaining)\n", $retry);
+		next;
+	    }
+
+	    exit (1);
+	}
+
+	exit (1);
+    }, %popts);
 }
 
 sub send
