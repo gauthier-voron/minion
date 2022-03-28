@@ -11,16 +11,44 @@ use Minion::System::Waitable;
 
 sub _check_member_type
 {
-    my ($self, $member) = @_;
+    my ($member) = @_;
 
-    return Minion::System::Waitable->comply($member);
+    if (ref($member) eq 'ARRAY') {
+	return ((scalar(@$member) >= 1) &&
+		Minion::System::Waitable->comply($member->[0]));
+
+    } else {
+	return Minion::System::Waitable->comply($member);
+    }
 }
 
 sub _check_member_state
 {
-    my ($self, $member) = @_;
+    my ($member) = @_;
 
-    return !defined($member->exitstatus());
+    if (ref($member) eq 'ARRAY') {
+	return !defined($member->[0]->exitstatus());
+    } else {
+	return !defined($member->exitstatus());
+    }
+}
+
+sub _wrap_member
+{
+    my ($member) = @_;
+
+    if (ref($member) eq 'ARRAY') {
+	return $member;
+    } else {
+	return [ $member ];
+    }
+}
+
+sub _get_member_process
+{
+    my ($member) = @_;
+
+    return $member->[0];
 }
 
 
@@ -35,19 +63,21 @@ sub new
 sub _init
 {
     my ($self, $members, @err) = @_;
-    my (%ms, $member);
+    my (%ms, $member, $wrapped);
 
     confess() if (@err);
     confess() if (!defined($members));
     confess() if (ref($members) ne 'ARRAY');
-    confess() if (grep { !$self->_check_member_type($_); } @$members);
+    confess() if (grep { !_check_member_type($_); } @$members);
 
     foreach $member (@$members) {
-	if (!$self->_check_member_state($member)) {
+	if (!_check_member_state($member)) {
 	    return undef;
 	}
 
-	$ms{$member} = $member;
+	$wrapped = _wrap_member($member);
+
+	$ms{_get_member_process($wrapped)} = $wrapped;
     }
 
     $self->{__PACKAGE__()}->{_members} = \%ms;
@@ -65,13 +95,23 @@ sub size
     return scalar(%{$self->{__PACKAGE__()}->{_members}});
 }
 
-sub members
+sub fullmembers
 {
     my ($self, @err) = @_;
 
     confess() if (@err);
 
     return values(%{$self->{__PACKAGE__()}->{_members}});
+}
+
+sub members
+{
+    my ($self, @err) = @_;
+
+    confess() if (@err);
+
+    return map { _get_member_process($_) }
+           values(%{$self->{__PACKAGE__()}->{_members}});
 }
 
 
@@ -82,9 +122,9 @@ sub add
 
     confess() if (@err);
     confess() if (!defined($member));
-    confess() if (!$self->_check_member_type($member));
+    confess() if (!_check_member_type($member));
 
-    if (!$self->_check_member_state($member)) {
+    if (!_check_member_state($member)) {
 	return 0;
     }
 
@@ -94,7 +134,9 @@ sub add
 	return 0;
     }
 
-    $members->{$member} = $member;
+    $member = _wrap_member($member);
+
+    $members->{_get_member_process($member)} = $member;
 
     return 1;
 }
@@ -106,7 +148,7 @@ sub remove
 
     confess() if (@err);
     confess() if (!defined($member));
-    confess() if (!$self->_check_member_type($member));
+    confess() if (!_check_member_type($member));
 
     $members = $self->{__PACKAGE__()}->{_members};
 
@@ -130,16 +172,16 @@ sub wait
     $ret = undef;
 
     while (!defined($ret)) {
-	@list = $self->members();
+	@list = $self->fullmembers();
 	%nlist = ();
 
 	foreach $member (@list) {
-	    if (defined($member->exitstatus())) {
+	    if (defined(_get_member_process($member)->exitstatus())) {
 		next;
 	    }
 
 	    if (!defined($ret)) {
-		$ret = $member->trywait();
+		$ret = _get_member_process($member)->trywait();
 
 		if (defined($ret)) {
 		    $ret = $member;
@@ -159,7 +201,19 @@ sub wait
 
     $self->{__PACKAGE__()}->{_members} = \%nlist;
 
-    return $ret;
+    if (wantarray()) {
+	if (defined($ret)) {
+	    return @$ret;
+	} else {
+	    return ();
+	}
+    } else {
+	if (defined($ret)) {
+	    return _get_member_process($ret);
+	} else {
+	    return undef;
+	}
+    }
 }
 
 sub waitall
