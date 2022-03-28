@@ -1,0 +1,50 @@
+#!/bin/bash
+
+set -e
+set -x
+
+install_root="${HOME}/install/libra"
+deploy_root="${HOME}/deploy/diem"
+
+test -e "${install_root}"
+
+export PATH="${install_root}/target/release:${PATH}"
+export PRIVATE_CONFIG=ignore
+
+command -v 'diem-node' > '/dev/null'
+
+
+ulimit -n 65535
+
+
+case "$1" in
+    'start')
+	killall -KILL diem-node 2> '/dev/null' || true
+	for dir in "${deploy_root}/"* ; do
+	    test -f "${dir}/node.yaml" || continue
+	    diem-node --config "${dir}/node.yaml" \
+		      > "${dir}/out" 2> "${dir}/err" &
+	    pid=$!
+	    echo ${pid} > "${dir}/pid"
+	done
+	sleep 2
+	;;
+    'kill')
+	for dir in "${deploy_root}/"* ; do
+	    pid="$(cat "${dir}/pid")" || continue
+	    kill -KILL ${pid} 2> '/dev/null' || continue
+	    rm "${dir}/pid"
+	done
+	;;
+    'stop')
+	for dir in "${deploy_root}/"* ; do
+	    pid="$(cat "${dir}/pid")" || continue
+	    kill -INT ${pid} 2> '/dev/null' || continue
+	done
+	sleep 5
+	exec "$0" kill
+	;;
+    *)
+	exit 1
+	;;
+esac

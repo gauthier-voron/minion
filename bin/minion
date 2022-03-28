@@ -93,7 +93,7 @@ my $RUN_RESULT = sub {
 		   $year, $mon, $day, $hour, $min, $sec);
 };
 my @RUN_INSTALLS = ();
-my @RUN_CHAINS = qw(algorand quorum-ibft quorum-raft poa libra solana avalanche);
+my @RUN_CHAINS = qw(algorand diem quorum-ibft quorum-raft poa libra solana avalanche);
 my @RUN_BREAKPOINTS = qw(boot install sync deploy chain benchmark);
 
 
@@ -430,16 +430,20 @@ sub _run
 	fatal("failed to stop %s blockchain", $chain);
     }
 
-    message("saving results in '%s' ...", $full);
+    mkdir($full);
+    message("saving results in '%s/results.json.gz' ...", $full);
     if ($primary->recv(
-	    [ 'deploy/diablo/primary/results'],
-	    TARGET => $full
+	    [ 'deploy/diablo/primary/results.json.gz'],
+	    TARGET => $full . '/results.json.gz'
 	)->wait() != 0) {
 
 	fatal("failed to save '%s' from %s ('%s') into '%s'",
-	      "deploy/diablo/primary/results", $primary->public_ip(),
-	      $primary->region(), $full);
+	      "deploy/diablo/primary/results.json.gz", $primary->public_ip(),
+	      $primary->region(), $full . '/results.json.gz');
     }
+
+    system("cd '$full' ; gunzip *.gz");
+    system('cp', $workload, $full . '/workload.yaml');
 
     message("saving chain name in '%s' ...", $full . '/name.txt');
     if (!open($fh, '>', $full . '/name.txt')) {
@@ -492,14 +496,14 @@ sub _run
 		$instance->public_ip(), $full);
 
 	$proc = $instance->recv(
-	    [ 'deploy/' . $chain . '/n*/out' ],
+	    [ 'deploy/' . $chain . '/*/out' ],
 	    TARGET => $full . '/chain-' . $instance->public_ip() .
 	              '-out.log'
 	    );
 	$pgrp->add($proc);
 
 	$proc = $instance->recv(
-	    [ 'deploy/' . $chain . '/n*/err' ],
+	    [ 'deploy/' . $chain . '/*/err' ],
 	    TARGET => $full . '/chain-' . $instance->public_ip() .
 	              '-err.log'
 	    );

@@ -1,0 +1,309 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use IO::Uncompress::Gunzip qw(gunzip);
+use JSON::PP;
+use List::Util qw(sum min max);
+
+
+sub extract
+{
+    my ($path) = @_;
+    my ($fh, $text);
+
+    if (!open($fh, '<', $path)) {
+	printf(STDERR "cannot open v2 file '%s': %s\n", $path, $!);
+	return undef;
+    } else {
+	if ($path =~ /\.gz$/) {
+	    $text = '';
+	    gunzip($fh => \$text);
+	} else {
+	    local $/ = undef;
+	    $text = <$fh>;
+	}
+	close($fh);
+    }
+
+    return decode_json($text);
+}
+
+sub safediv
+{
+    my ($num, $div, $default) = @_;
+
+    if ($div == 0) {
+	if (!defined($default)) {
+	    return 0;
+	} else {
+	    return $default;
+	}
+    }
+
+    return ($num / $div);
+}
+
+sub average
+{
+    my ($list, $default) = @_;
+
+    if (scalar(@$list) == 0) {
+	if (!defined($default)) {
+	    return 0;
+	} else {
+	    return $default;
+	}
+    }
+
+    return sum(@$list) / scalar(@$list);
+}
+
+sub median
+{
+    my ($list, $default) = @_;
+    my (@sorted);
+
+    if (scalar(@$list) == 0) {
+	if (!defined($default)) {
+	    return 0;
+	} else {
+	    return $default;
+	}
+    }
+
+    @sorted = sort { $a <=> $b } @$list;
+
+    if ((scalar(@sorted) % 2) == 0) {
+	return ($sorted[int(scalar(@sorted) / 2) - 1] +
+		$sorted[int(scalar(@sorted) / 2)    ]) / 2
+    } else {
+	return $sorted[int(scalar(@sorted) / 2)];
+    }
+}
+
+sub convert
+{
+    my ($data) = @_;
+    my ($location, $client, $interaction, $latency);
+    my ($v1, $arr, $sec, $end, $latencies, $throughputs, $maxcommit, $fails);
+    my (@secthroughputs, @secthrwindows, $time);
+
+    $v1 = {
+	'RawResults' => [],
+	'SecondaryResults' => []
+    };
+
+    $end = 0;
+
+    # Level 0: find last benchmark second
+    foreach $location (@{$data->{'Locations'}}) {
+	foreach $client (@{$location->{'Clients'}}) {
+	    foreach $interaction (@{$client->{'Interactions'}}) {
+		foreach $time ('SubmitTime', 'CommitTime', 'AbortTime') {
+		    if (int($interaction->{$time}) > $end) {
+			$end = int($interaction->{$time});
+		    }
+		}
+	    }
+	}
+    }
+
+    # Level 1: per thread (= per client) results
+    foreach $location (@{$data->{'Locations'}}) {
+	$arr = [];
+
+	foreach $client (@{$location->{'Clients'}}) {
+	    $latencies = [];
+	    $throughputs = { map { $_ => 0 } (0 .. $end) };
+	    $maxcommit = 0;
+	    $fails = 0;
+
+	    foreach $interaction (@{$client->{'Interactions'}}) {
+		if ($interaction->{'CommitTime'} < 0) {
+		    $fails += 1;
+		    next;
+		} elsif ($interaction->{'AbortTime'} >= 0) {
+		    $fails += 1;
+		    next;
+		}
+
+		$latency = int(($interaction->{'CommitTime'} -
+				$interaction->{'SubmitTime'}) * 1000);
+
+		$throughputs->{int($interaction->{'CommitTime'})} += 1;
+
+		if ($interaction->{'CommitTime'} > $maxcommit) {
+		    $maxcommit = $interaction->{'CommitTime'};
+		}
+
+		push(@$latencies, $latency);
+	    }
+
+	    push(@$arr, {
+		'TxLatencies' => $latencies,
+		'AverageLatency' => average($latencies),
+		'MedianLatency' => median($latencies),
+		'Throughput' => safediv(scalar(@$latencies), $maxcommit),
+		'ThroughputSeconds' => [ map { $throughputs->{$_} }
+					 sort { $a <=> $b }
+					 keys(%$throughputs) ],
+		'Success' => scalar(@$latencies),
+		'Fail' => $fails
+	    });
+	}
+
+	push(@{$v1->{'RawResults'}}, $arr);
+    }
+
+    # Level 2: per secondary (= per location) results
+    foreach $location (@{$data->{'Locations'}}) {
+	$latencies = [];
+	$throughputs = { map { $_ => 0 } (0 .. $end) };
+	$maxcommit = 0;
+	$fails = 0;
+
+	foreach $client (@{$location->{'Clients'}}) {
+	    foreach $interaction (@{$client->{'Interactions'}}) {
+		if ($interaction->{'CommitTime'} < 0) {
+		    $fails += 1;
+		    next;
+		} elsif ($interaction->{'AbortTime'} >= 0) {
+		    $fails += 1;
+		    next;
+		}
+
+		$latency = int(($interaction->{'CommitTime'} -
+				$interaction->{'SubmitTime'}) * 1000);
+
+		$throughputs->{int($interaction->{'CommitTime'})} += 1;
+
+		if ($interaction->{'CommitTime'} > $maxcommit) {
+		    $maxcommit = $interaction->{'CommitTime'};
+		}
+
+		push(@$latencies, $latency);
+	    }
+	}
+
+	push(@{$v1->{'SecondaryResults'}}, {
+	    'TxLatencies' => $latencies,
+	    'AverageLatency' => average($latencies),
+	    'MedianLatency' => median($latencies),
+	    'Throughput' => safediv(scalar(@$latencies), $maxcommit),
+	    'ThroughputSeconds' => [ map { $throughputs->{$_} }
+				     sort { $a <=> $b }
+				     keys(%$throughputs) ],
+	    'Success' => scalar(@$latencies),
+	    'Fail' => $fails
+	});
+
+	push(@secthroughputs, safediv(scalar(@$latencies), $maxcommit));
+	push(@secthrwindows, [ map { $throughputs->{$_} }
+			       sort { $a <=> $b }
+			       keys(%$throughputs) ]);
+    }
+
+    # Level 2: total results
+    $latencies = [];
+    $throughputs = { map { $_ => 0 } (0 .. $end) };
+    $maxcommit = 0;
+    $fails = 0;
+
+    foreach $location (@{$data->{'Locations'}}) {
+	foreach $client (@{$location->{'Clients'}}) {
+	    foreach $interaction (@{$client->{'Interactions'}}) {
+		if ($interaction->{'CommitTime'} < 0) {
+		    $fails += 1;
+		    next;
+		} elsif ($interaction->{'AbortTime'} >= 0) {
+		    $fails += 1;
+		    next;
+		}
+
+		$latency = int(($interaction->{'CommitTime'} -
+				$interaction->{'SubmitTime'}) * 1000);
+
+		$throughputs->{int($interaction->{'CommitTime'})} += 1;
+
+		if ($interaction->{'CommitTime'} > $maxcommit) {
+		    $maxcommit = $interaction->{'CommitTime'};
+		}
+
+		push(@$latencies, $latency);
+	    }
+	}
+    }
+
+    $v1->{'MinLatency'} = min(@$latencies);
+    $v1->{'AverageLatency'} = average($latencies);
+    $v1->{'MaxLatency'} = max(@$latencies);
+    $v1->{'MedianLatency'} = median($latencies);
+    $v1->{'AllTxLatencies'} = $latencies;
+    $v1->{'TotalThroughputOverTime'} = [ map { $throughputs->{$_} }
+					 sort { $a <=> $b }
+					 keys(%$throughputs) ];
+    $v1->{'AverageThroughputSecondaries'} = \@secthroughputs;
+    $v1->{'TotalThroughputPerSecondaryPerWindow'} = \@secthrwindows;
+    $v1->{'MaximumThroughput'} = max(values(%$throughputs));
+    $v1->{'MinimumThroughput'} = min(values(%$throughputs));
+    $v1->{'AverageThroughput'} = average([ values(%$throughputs) ]);
+    $v1->{'TotalSuccess'} = scalar(@$latencies);
+    $v1->{'TotalFails'} = $fails;
+
+    return $v1;
+}
+
+my %ORDER = (
+    'RawResults'                           => 0,
+    'SecondaryResults'                     => 1,
+    'TxLatencies'                          => 2,
+    'MinLatency'                           => 3,
+    'AverageLatency'                       => 4,
+    'MaxLatency'                           => 5,
+    'MedianLatency'                        => 6,
+    'Throughput'                           => 7,
+    'ThroughputSeconds'                    => 8,
+    'Success'                              => 9,
+    'Fail'                                 => 10,
+    'AllTxLatencies'                       => 11,
+    'TotalThroughputOverTime'              => 12,
+    'AverageThroughputSecondaries'         => 13,
+    'TotalThroughputPerSecondaryPerWindow' => 14,
+    'MaximumThroughput'                    => 15,
+    'MinimumThroughput'                    => 16,
+    'AverageThroughput'                    => 17,
+    'TotalSuccess'                         => 18,
+    'TotalFails'                           => 19,
+    );
+
+sub main
+{
+    my ($v2) = @_;
+    my ($data);
+
+    $data = extract($v2);
+    if (!defined($data)) {
+	return 1;
+    }
+
+    $data = convert($data);
+
+    my $encoder = JSON::PP->new()->pretty();
+
+    $encoder->indent_length(1);
+    $encoder->space_before(0);
+
+    $encoder->sort_by(sub {
+	$ORDER{$JSON::PP::a} <=> $ORDER{$JSON::PP::b}
+    });
+
+    print $encoder->encode($data);
+
+    return 0;
+}
+
+
+exit (main(@ARGV));
+__END__

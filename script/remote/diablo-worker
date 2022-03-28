@@ -62,7 +62,7 @@ setup_environment() {
 # Primary node  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 start_primary() {
-    local dir pid port
+    local dir pid port nsecondary
 
     dir="${deploy_root}/primary"
 
@@ -71,19 +71,30 @@ start_primary() {
     fi
 
     port="$(cat "${dir}/port")"
+    nsecondary="$(cat "${dir}/nsecondary")"
 
     if ! echo "${port}" | grep -Pq '^\d+$' ; then
 	fatal "cannot start diablo primary with port '${port}'"
     fi
 
+    # diablo primary \
+    #     --config="${deploy_root}/workload.yaml"\
+    #     --chain-config="${dir}/chain.yaml" \
+    # 	--addr="0.0.0.0:${port}" \
+    # 	--level='DEBUG' \
+    # 	> "${dir}/out" \
+    # 	2> "${dir}/err" &
+    set -x
     diablo primary \
-        --config="${deploy_root}/workload.yaml"\
-        --chain-config="${dir}/chain.yaml" \
-	--addr="0.0.0.0:${port}" \
-	--level='DEBUG' \
-	> "${dir}/out" \
-	2> "${dir}/err" &
+	   -vvv \
+	   --env="accounts=${dir}/accounts.yaml" \
+	   --port=${port} \
+	   --output="${dir}/results.json" \
+	   --compress --stat \
+	   ${nsecondary} "${dir}/setup.yaml" "${deploy_root}/workload.yaml" \
+	   > "${dir}/out" 2> "${dir}/err" &
     pid=$!
+    set +x
 
     echo ${pid} > "${dir}/pid"
 
@@ -147,18 +158,13 @@ wait_primary() {
 	echo 'No results found'
 	mkdir "${dir}/results"
     fi
-
-    echo "--"
-    cat "${dir}/out"
-    echo "--"
-    cat "${dir}/err"
 }
 
 
 # Secondary node  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 start_secondary() {
-    local dir pid addr
+    local dir pid addr ip port region
 
     for dir in "${deploy_root}/secondary"* ; do
 	if [ ! -d "${dir}" ] ; then
@@ -166,15 +172,26 @@ start_secondary() {
 	fi
 
 	addr="$(cat "${dir}/primary")"
+	ip="$(echo "${addr}" | cut -d':' -f1)"
+	port="$(echo "${addr}" | cut -d':' -f2)"
+	region="$(cat "${dir}/region")"
 
+	# diablo secondary \
+	#        -m "${addr}" \
+        #        --config="${deploy_root}/workload.yaml" \
+	#        --chain-config="${deploy_root}/chain.yaml" \
+	#        --level='DEBUG' \
+	#        > "${dir}/out" \
+	#        2> "${dir}/err" &
+	set -x
 	diablo secondary \
-	       -m "${addr}" \
-               --config="${deploy_root}/workload.yaml" \
-	       --chain-config="${deploy_root}/chain.yaml" \
-	       --level='DEBUG' \
-	       > "${dir}/out" \
-	       2> "${dir}/err" &
+	       -v \
+	       --tag="${region}" \
+	       --port=${port} \
+	       ${ip} \
+	       > "${dir}/out" 2> "${dir}/err" &
 	pid=$!
+	set +x
 
 	echo ${pid} > "${dir}/pid"
     done
