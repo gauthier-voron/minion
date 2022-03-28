@@ -48,16 +48,20 @@ prepare() {
 deploy_primary() {
     if [ $# -lt 1 ] ; then
 	fatal "missing port operand"
-    elif [ $# -gt 1 ] ; then
-	fatal "unexpected operand '$2'"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing nsecondary operand"
+    elif [ $# -gt 2 ] ; then
+	fatal "unexpected operand '$3'"
     fi
 
     local port="$1" ; shift
+    local nsecondary="$1" ; shift
 
     prepare
 
     mkdir "${deploy_root}/primary"
     echo "${port}" > "${deploy_root}/primary/port"
+    echo "${nsecondary}" > "${deploy_root}/primary/nsecondary"
 }
 
 
@@ -66,11 +70,14 @@ deploy_primary() {
 deploy_secondary() {
     if [ $# -lt 1 ] ; then
 	fatal "missing addr:port operand"
-    elif [ $# -gt 2 ] ; then
-	fatal "unexpected operand '$3'"
+    elif [ $# -lt 2 ] ; then
+	fatal "missing region operand"
+    elif [ $# -gt 3 ] ; then
+	fatal "unexpected operand '$4'"
     fi
 
     local primary="$1" ; shift
+    local region="$1" ; shift
     local number="$1"
     local i
 
@@ -85,6 +92,7 @@ deploy_secondary() {
     for i in $(seq 0 $(( number - 1 ))) ; do
 	mkdir "${deploy_root}/secondary${i}"
 	echo "${primary}" > "${deploy_root}/secondary${i}/primary"
+	echo "${region}" > "${deploy_root}/secondary${i}/region"
     done
 }
 

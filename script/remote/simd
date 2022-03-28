@@ -1,0 +1,193 @@
+#!/bin/bash
+
+
+set -e
+
+config() {
+    local root="$1" ; shift
+    local key="$1" ; shift
+
+    case "${key}" in
+	'task')
+	    echo "${root}/task"
+	    ;;
+	'data')
+	    echo "${root}/data"
+	    ;;
+	'bin')
+	    echo "${root}/bin"
+	    ;;
+	'pid')
+	    echo "${root}/pid"
+	    ;;
+	'signal')
+	    echo "${root}/signal"
+	    ;;
+	*)
+	    return 1
+    esac
+
+    return 0
+}
+
+
+setup_dir() {
+    local name="$1" ; shift
+    local path="$1" ; shift
+
+    if [ ! -d "${path}" ] ; then
+	if ! mkdir --parents "${path}" ; then
+	    echo "unable to create ${name} dir: '${path}'" >&2
+	    exit 1
+	fi
+    fi
+}
+
+setup() {
+    local task="$1" ; shift
+    local size="$1" ; shift
+    local root data bin sig pid
+
+    if ! echo "${size}" | grep -Pq '^\d+$' ; then
+	echo "invalild size: '${size}'" >&2
+	exit 1
+    fi
+
+    root="$(mktemp -d --suffix='.d' "${HOME}/.minion-simd.XXXXXX")"
+    data="$(config "${root}" 'data')"
+    bin="$(config "${root}" 'bin')"
+    sig="$(config "${root}" 'signal')"
+    pid="$(config "${root}" 'pid')"
+
+    setup_dir 'root' "${root}"
+    setup_dir 'bin' "${bin}"
+
+    setup_dir 'data' "${data}"
+
+    for i in $(seq 0 $(( size - 1 ))) ; do
+	mkdir "${data}/${i}"
+    done
+
+    mv "${task}" "$(config "${root}" 'task')"
+
+    echo 0 > "${sig}"
+
+    cat > "${bin}/minion-fence" <<EOF
+#!/bin/bash
+polled="\$(cat '${pid}')"
+
+echo 1 > '${sig}'
+
+while [ "\$(cat '${sig}')" -eq 1 ] ; do
+    if ! ps \$polled > '/dev/null' ; then
+        break
+    fi
+    sleep 1
+done
+EOF
+    chmod 755 "${bin}/minion-fence"
+
+    echo "${root}"
+}
+
+start() {
+    local root="$1" ; shift
+    local id="$1" ; shift
+    local size="$1" ; shift
+    local task i
+
+    if [ ! -d "${root}" ] ; then
+	echo "invalild root: '${root}'" >&2
+	exit 1
+    fi
+
+    if ! echo "${id}" | grep -Pq '^\d+$' ; then
+	echo "invalild id: '${id}'" >&2
+	exit 1
+    fi
+
+    if ! echo "${size}" | grep -Pq '^\d+$' ; then
+	echo "invalild size: '${size}'" >&2
+	exit 1
+    fi
+
+    task="$(config "${root}" 'task')"
+
+    if [ "${task:0:1}" != '/' ] ; then
+	task="./${task}"
+    fi
+
+    export MINION_SIMD_ID=${id}
+    export MINION_SIMD_SIZE=${size}
+    export MINION_SIMD_IDS="$(seq 0 $(( size - 1 )))"
+    export MINION_SIMD_DIR="$(config "${root}" 'data')"
+    export PATH="$(config "${root}" 'bin'):${PATH}"
+
+    echo $$ > "$(config "${root}" 'pid')"
+    exec "${task}" "$@"
+}
+
+poll() {
+    local root="$1" ; shift
+    local pid="$(config "${root}" 'pid')"
+    local sig="$(config "${root}" 'signal')"
+    local polled
+
+    while [ ! -f "${pid}" ] ; do
+	sleep 1
+    done
+
+    polled="$(cat "${pid}")"
+
+    while [ "$(cat "${sig}")" -eq 0 ] ; do
+	if ! ps ${polled} > '/dev/null' ; then
+            exit 1
+	fi
+	sleep 1
+    done
+
+    exit 0
+}
+
+synced() {
+    local root="$1" ; shift
+    local sig="$(config "${root}" 'signal')"
+
+    echo 0 > "${sig}"
+}
+
+clean() {
+    local root="$1" ; shift
+
+    rm -rf "${root}"
+    rm "$0"
+}
+
+
+
+action="$1" ; shift
+case "${action}" in
+    'setup')
+	setup "$@"
+	;;
+    'start')
+	start "$@"
+	;;
+    'poll')
+	poll "$@"
+	;;
+    'synced')
+	synced "$@"
+	;;
+    'repoll')
+	synced "$@"
+	poll "$@"
+	;;
+    'clean')
+	clean "$@"
+	;;
+    *)
+	echo "unknown action '${action}'" >&2
+	exit 1
+	;;
+esac

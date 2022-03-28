@@ -333,6 +333,42 @@ sub _detect_systems
     return \%systems;
 }
 
+sub resolve
+{
+    my ($self, $workers, $cmd) = @_;
+    my ($fleet, $systems, $name, $worker, $system, $path, @paths);
+
+    confess() if (!defined($cmd));
+    confess() if (ref($cmd) ne 'ARRAY');
+    confess() if (scalar(@$cmd) < 1);
+    confess() if (grep { ref($_) ne '' } @$cmd);
+    confess() if (ref($workers) ne 'ARRAY');
+    confess() if (grep { !Minion::Worker->comply($_) } @$workers);
+
+    $fleet = Minion::StaticFleet->new($workers);
+
+    $systems = $self->_detect_systems($fleet);
+
+    if (!defined($systems)) {
+	return undef;
+    }
+
+    $name = $cmd->[0];
+
+    foreach $worker (@$workers) {
+	$system = $worker->get('run:system');
+	$path = $self->resolve_remote($name, $system);
+
+	if (!defined($path)) {
+	    return undef;
+	}
+
+	push(@paths, $path);
+    }
+
+    return \@paths;
+}
+
 sub run
 {
     my ($self, $fleet, $cmd, %opts) = @_;

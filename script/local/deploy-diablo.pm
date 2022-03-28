@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use File::Temp qw(tempfile);
+use List::Util qw(sum);
 
 use Minion::System::Pgroup;
 
@@ -36,6 +37,7 @@ my $KEYS_LOC = $DEPLOY . '/keys.json';
 
 
 my $ALGORAND_CHAINCONFIG_PATH = $SHARED . '/algorand-chain.yml';
+my $DIEM_PATH = $SHARED . '/diem';
 my $LIBRA_CHAIN_PATH = $SHARED . '/libra/chain.yaml';
 my $POA_CHAIN_PATH = $SHARED . '/poa/chain.yaml';
 my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
@@ -202,9 +204,43 @@ sub deploy_diablo_chain
     return 1;
 }
 
+sub deploy_diablo_primary
+{
+    my ($primary, $dir) = @_;
+    my ($dh, $entry, $pgrp, $proc);
+
+    if (!opendir($dh, $dir)) {
+	die ("cannot open chain directory '$dir': $!");
+    }
+
+    $proc = $primary->send(
+	[
+	  map { $dir . '/' . $_ }
+	  grep { ! /^\.\.?$/ }
+	  readdir($dh)
+	],
+	TARGET => $DEPLOY . '/primary');
+
+    closedir($dh);
+
+    return ($proc->wait() == 0);
+}
+
 sub deploy_diablo_algorand
 {
     return deploy_diablo_chain(@_, $ALGORAND_CHAINCONFIG_PATH);
+}
+
+sub deploy_diablo_diem
+{
+    my ($nodes) = @_;
+    my ($primary);
+
+    ($primary) = map { $nodes->{$_}->{'worker'} }
+                 grep { $nodes->{$_}->{'primary'} > 0 }
+                 keys(%$nodes);
+
+    return deploy_diablo_primary($primary, $DIEM_PATH);
 }
 
 sub deploy_diablo_libra
@@ -267,6 +303,7 @@ sub specialize_workload
     close($wfh);
 }
 
+
 sub deploy_diablo
 {
     my ($nodes, $ip, $primary, @secondaries, $proc, @procs, @stats);
@@ -282,7 +319,9 @@ sub deploy_diablo
 	if ($nodes->{$ip}->{'primary'} > 0) {
 	    $proc = $RUNNER->run(
 		$nodes->{$ip}->{'worker'},
-		[ 'deploy-diablo-worker', 'primary', $PRIMARY_TCP_PORT ]
+		[ 'deploy-diablo-worker', 'primary', $PRIMARY_TCP_PORT,
+		  sum map { $nodes->{$_}->{'secondaries'} } keys(%$nodes)
+		]
 		);
 	    if ($proc->wait() != 0) {
 		die ("cannot to deploy diablo primary on worker");
@@ -298,6 +337,7 @@ sub deploy_diablo
 		$nodes->{$ip}->{'worker'},
 		[ 'deploy-diablo-worker', 'secondary',
 		  $primary . ':' . $PRIMARY_TCP_PORT,
+		  $nodes->{$ip}->{'worker'}->region(),
 		  $nodes->{$ip}->{'secondaries'} ]
 		);
 	    push(@procs, $proc);
@@ -334,6 +374,10 @@ sub deploy_diablo
 
     if (-f $ALGORAND_CHAINCONFIG_PATH) {
 	return deploy_diablo_algorand($nodes, $primary, \@secondaries);
+    }
+
+    if (-f ($DIEM_PATH . '/setup.yaml')) {
+	return deploy_diablo_diem($nodes);
     }
 
     if (-f $LIBRA_CHAIN_PATH) {
