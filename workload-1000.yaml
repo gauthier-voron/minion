@@ -1,0 +1,113 @@
+let:
+
+  - !loop &account
+    sample: !account
+      number: 130
+      stake: 1000000000
+
+  - !loop &l-ap-south-1     { sample: !location [ "ap-south-1"     ] }
+  - !loop &l-af-south-1     { sample: !location [ "af-south-1"     ] }
+  - !loop &l-eu-south-1     { sample: !location [ "eu-south-1"     ] }
+  - !loop &l-eu-north-1     { sample: !location [ "eu-north-1"     ] }
+  - !loop &l-us-east-2      { sample: !location [ "us-east-2"      ] }
+  - !loop &l-ap-northeast-1 { sample: !location [ "ap-northeast-1" ] }
+  - !loop &l-sa-east-1      { sample: !location [ "sa-east-1"      ] }
+  - !loop &l-ap-southeast-2 { sample: !location [ "ap-southeast-2" ] }
+  - !loop &l-me-south-1     { sample: !location [ "me-south-1"     ] }
+  - !loop &l-us-west-2      { sample: !location [ "us-west-2"      ] }
+
+  - !loop &e-ap-south-1     { sample: !endpoint [ "ap-south-1"     ] }
+  - !loop &e-af-south-1     { sample: !endpoint [ "af-south-1"     ] }
+  - !loop &e-eu-south-1     { sample: !endpoint [ "eu-south-1"     ] }
+  - !loop &e-eu-north-1     { sample: !endpoint [ "eu-north-1"     ] }
+  - !loop &e-us-east-2      { sample: !endpoint [ "us-east-2"      ] }
+  - !loop &e-ap-northeast-1 { sample: !endpoint [ "ap-northeast-1" ] }
+  - !loop &e-sa-east-1      { sample: !endpoint [ "sa-east-1"      ] }
+  - !loop &e-ap-southeast-2 { sample: !endpoint [ "ap-southeast-2" ] }
+  - !loop &e-me-south-1     { sample: !endpoint [ "me-south-1"     ] }
+  - !loop &e-us-west-2      { sample: !endpoint [ "us-west-2"      ] }
+
+  - &tps { sample: !float { from: 100, to: 101 } }
+
+workloads:
+
+  - number: 1
+    client:
+      location: *l-ap-south-1
+      view: *e-ap-south-1
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-af-south-1
+      view: *e-af-south-1
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-eu-south-1
+      view: *e-eu-south-1
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-eu-north-1
+      view: *e-eu-north-1
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-us-east-2
+      view: *e-us-east-2
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-ap-northeast-1
+      view: *e-ap-northeast-1
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-sa-east-1
+      view: *e-sa-east-1
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-ap-southeast-2
+      view: *e-ap-southeast-2
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-me-south-1
+      view: *e-me-south-1
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
+  - number: 1
+    client:
+      location: *l-us-west-2
+      view: *e-us-west-2
+      behavior:
+        - interaction: !transfer { from: *account, to: *account }
+          load: { 0: *tps, 120: 0 }
+
