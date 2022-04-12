@@ -43,6 +43,7 @@ setup_environment() {
     fi
 
     export PATH="${install_root}/go/bin:${PATH}"
+    export PATH="${install_root}/algorand-tools:${PATH}"
 
     if ! command -v 'goal' > '/dev/null' 2> '/dev/null' ; then
 	fatal "cannot find goal executable in '${install_root}'"
@@ -183,27 +184,12 @@ generate_algod_tokens() {
 #
 generate_chainconfig() {
     local netroot="$1" ; shift
-    local datadir account mnemonic pid
+    local nodefile="$1" ; shift
+    local nodenum datadir account mnemonic pid
 
-    (
-	for datadir in "${netroot}/n"*/ ; do
-	    goal account list --datadir "${datadir}" | awk '{print $2}' \
-		| while read account ; do
-		echo "- address:  ${account}"
+    nodenum=$(cat "${nodefile}" | wc -l)
 
-		mnemonic="$(goal account export --datadir "${datadir}" \
-                                                --address "${account}" \
-                            | tail -n1 | sed -r 's/^.*: "(.*)"$/\1/')"
-
-		echo "  mnemonic: ${mnemonic}"
-	    done
-
-	    pid=$(ps -eo pid,args | grep -v 'grep' | grep 'kmd' \
-		      | grep "${datadir}kmd-v" | awk '{print $1}')
-
-	    kill -TERM ${pid}
-	done
-    ) > "${deploy_root}/accounts.yaml"
+    algorand-chainfile-generator "${netroot}" "${nodenum}" "${deploy_root}/accounts.yaml"
 }
 
 # Generate an Algorand testnet specification in "$deploy_root/network" and a
@@ -250,7 +236,7 @@ generate() {
     set_goal_network_address "${netroot}" "${nodefile}"
     generate_start_scripts "${netroot}" "${nodefile}"
     generate_algod_tokens "${netroot}" "${nodefile}"
-    generate_chainconfig "${netroot}"
+    generate_chainconfig "${netroot}" "${nodefile}"
 
     rm "${netroot}/genesis.json"  # already in each node
     rm "${netroot}/network.json"  # only used by goal network
