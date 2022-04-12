@@ -186,19 +186,16 @@ generate_chainconfig() {
     local datadir account mnemonic pid
 
     (
-	echo 'extra:'
-	echo '  - accounts:'
-
 	for datadir in "${netroot}/n"*/ ; do
 	    goal account list --datadir "${datadir}" | awk '{print $2}' \
 		| while read account ; do
-		echo "    - address:  ${account}"
+		echo "- address:  ${account}"
 
 		mnemonic="$(goal account export --datadir "${datadir}" \
                                                 --address "${account}" \
                             | tail -n1 | sed -r 's/^.*: "(.*)"$/\1/')"
 
-		echo "      mnemonic: ${mnemonic}"
+		echo "  mnemonic: ${mnemonic}"
 	    done
 
 	    pid=$(ps -eo pid,args | grep -v 'grep' | grep 'kmd' \
@@ -206,7 +203,7 @@ generate_chainconfig() {
 
 	    kill -TERM ${pid}
 	done
-    ) > "${deploy_root}/chain.yml"
+    ) > "${deploy_root}/accounts.yaml"
 }
 
 # Generate an Algorand testnet specification in "$deploy_root/network" and a

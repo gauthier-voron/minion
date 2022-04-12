@@ -36,7 +36,7 @@ my $WORKLOAD_LOC = $DEPLOY . '/workload.yaml';
 my $KEYS_LOC = $DEPLOY . '/keys.json';
 
 
-my $ALGORAND_CHAINCONFIG_PATH = $SHARED . '/algorand-chain.yml';
+my $ALGORAND_PATH = $SHARED . '/algorand';
 my $DIEM_PATH = $SHARED . '/diem';
 my $LIBRA_CHAIN_PATH = $SHARED . '/libra/chain.yaml';
 my $POA_CHAIN_PATH = $SHARED . '/poa/chain.yaml';
@@ -228,7 +228,14 @@ sub deploy_diablo_primary
 
 sub deploy_diablo_algorand
 {
-    return deploy_diablo_chain(@_, $ALGORAND_CHAINCONFIG_PATH);
+    my ($nodes) = @_;
+    my ($primary);
+
+    ($primary) = map { $nodes->{$_}->{'worker'} }
+                 grep { $nodes->{$_}->{'primary'} > 0 }
+                 keys(%$nodes);
+
+    return deploy_diablo_primary($primary, $ALGORAND_PATH);
 }
 
 sub deploy_diablo_diem
@@ -372,8 +379,8 @@ sub deploy_diablo
     }
 
 
-    if (-f $ALGORAND_CHAINCONFIG_PATH) {
-	return deploy_diablo_algorand($nodes, $primary, \@secondaries);
+    if (-f ($ALGORAND_PATH . '/setup.yaml')) {
+	return deploy_diablo_algorand($nodes);
     }
 
     if (-f ($DIEM_PATH . '/setup.yaml')) {

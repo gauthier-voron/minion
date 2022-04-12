@@ -27,12 +27,7 @@ my $CLIENT_TCP_PORT = 9000;
 my $NETWORK_NAME = 'network';
 my $NETWORK_PATH = $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME;
 
-my $CHAINEXTRA_NAME = 'chain.yml';
-my $CHAINEXTRA_PATH = $ENV{MINION_PRIVATE} . '/' . $CHAINEXTRA_NAME;
-
-my $CHAINCONFIG_NAME = 'algorand-chain.yml';
-my $CHAINCONFIG_PATH = $ENV{MINION_SHARED} . '/' . $CHAINCONFIG_NAME;
-my $CHAINCONFIG_TCP_PORT = 3000;
+my $ALGORAND_PATH = $ENV{MINION_SHARED} . '/algorand';
 
 
 # Extract from the given $path the Algorand nodes.
@@ -267,32 +262,42 @@ sub dispatch
     }
 }
 
-sub build_chainconfig
+sub generate_setup
 {
-    my ($path, $nodes, $extra) = @_;
-    my ($fh, $ip, $i, $eh, $line);
+    my ($nodes, $target) = @_;
+    my ($ifh, $ofh, $line, $ip, $i, $port, $worker, %groups, $tags);
 
-    if (!open($fh, '>', $path)) {
-	die ("cannot create algorand chain config '$path' : $!");
-    }
-
-    printf($fh "name: algorand\n");
-    printf($fh "nodes:\n");
-
-    foreach $ip (keys(%$nodes)) {
+	foreach $ip (keys(%$nodes)) {
 	for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
-	    printf($fh "  - %s:%d\n", $ip, $CLIENT_TCP_PORT + $i);
+		$line = sprintf("%s:%d", $ip, $CLIENT_TCP_PORT + $i);
+		$tags = $nodes->{$ip}->{'worker'}->region();
+		push(@{$groups{$tags}}, $line);
 	}
     }
 
-    if (open($eh, '<', $extra)) {
-	while (defined($line = <$eh>)) {
-	    printf($fh "%s", $line);
-	}
-	close($eh);
+    if (!open($ofh, '>', $target)) {
+	return 0;
     }
 
-    close($fh);
+    printf($ofh "interface: \"algorand\"\n");
+    printf($ofh "\n");
+    printf($ofh "endpoints:\n");
+
+    foreach $tags (keys(%groups)) {
+	printf($ofh "\n");
+	printf($ofh "  - addresses:\n");
+	foreach $line (@{$groups{$tags}}) {
+	    printf($ofh "    - %s\n", $line);
+	}
+	printf($ofh "    tags:\n");
+	foreach $line (split("\n", $tags)) {
+	    printf($ofh "    - %s\n", $line);
+	}
+    }
+
+    close($ofh);
+
+    return 1;
 }
 
 sub deploy_algorand
@@ -347,19 +352,24 @@ sub deploy_algorand
     }
 
     $proc = $genworker->recv(
-	[ 'deploy/algorand/' . $NETWORK_NAME . '.tar.gz',
-	  'deploy/algorand/' . $CHAINEXTRA_NAME
-	],
+	[ 'deploy/algorand/' . $NETWORK_NAME . '.tar.gz' ],
 	TARGET => $ENV{MINION_PRIVATE}
 	);
     if ($proc->wait() != 0) {
 	die ("cannot receive algorand testnet from worker");
     }
+	$proc = $genworker->recv(
+	[ 'deploy/algorand/' . 'accounts.yaml' ],
+	TARGET => $ALGORAND_PATH . '/accounts.yaml'
+	);
+    if ($proc->wait() != 0) {
+	die ("cannot receive algorand accounts from worker");
+    }
 
     $genworker->execute(
 	[ 'rm', '-rf',
 	  'deploy/algorand/' . $NETWORK_NAME . '.tar.gz',
-	  'deploy/algorand/' . $CHAINEXTRA_NAME,
+	  'deploy/algorand/' . 'accounts.yaml',
 	  'deploy/algorand/' . $NETWORK_TEMPLATE_NAME,
 	  'deploy/algorand/' . $NODEFILE_NAME ]
 	)->wait();
@@ -372,7 +382,7 @@ sub deploy_algorand
     system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
 	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
-    build_chainconfig($CHAINCONFIG_PATH, $nodes, $CHAINEXTRA_PATH);
+	generate_setup($nodes, $ALGORAND_PATH . '/setup.yaml');
 
     dispatch($nodes, $NETWORK_PATH);
 
