@@ -81,6 +81,10 @@ sub deploy_diem
 {
     my ($simd, $fh, $line, $ip, %workers, $worker, $assigned, @workers);
 
+	if (!(-e $ROLE_PATH)) {
+	return 1;
+    }
+
     if (!open($fh, '<', $ROLE_PATH)) {
 	return 0;
     }

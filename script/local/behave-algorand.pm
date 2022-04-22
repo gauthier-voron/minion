@@ -26,6 +26,11 @@ use Getopt::Long qw(GetOptionsFromArray);
 #   - $ENV{MINION_PRIVATE} : the path to a directory to store private data.
 #
 
+my $MINION_SHARED = $ENV{MINION_SHARED};        # Environment (setup by Runner)
+
+my $DATA_DIR = $MINION_SHARED . '/algorand';     # Where to store things across
+                                                 # Runner invocations
+
 my $fleet = $_;
 my ($number, @err);
 my (@ips, $worker, $ip, $fh, $nodes);
@@ -45,6 +50,10 @@ $nodes = $ENV{MINION_SHARED} . '/algorand-nodes';
 
 if (!defined($number)) {
     $number = 1;
+}
+
+if (!(-d $DATA_DIR) && !mkdir($DATA_DIR)) {
+    die ("cannot create data directory: $!");
 }
 
 foreach $worker ($fleet->members()) {

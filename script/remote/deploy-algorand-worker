@@ -15,6 +15,7 @@ set -e
 script_name='deploy-algorand-worker'
 install_root="${HOME}/install/algorand"
 deploy_root="${HOME}/deploy/algorand"
+prepare_root="${HOME}/prepare/algorand"
 
 
 # Utility functions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -43,6 +44,7 @@ setup_environment() {
     fi
 
     export PATH="${install_root}/go/bin:${PATH}"
+    export PATH="${install_root}/algorand-tools:${PATH}"
 
     if ! command -v 'goal' > '/dev/null' 2> '/dev/null' ; then
 	fatal "cannot find goal executable in '${install_root}'"
@@ -57,8 +59,14 @@ prepare() {
 	fatal "unexpected operand '$1'"
     fi
 
-    if [ ! -d "${deploy_root}" ] ; then
+    if [ -e "${deploy_root}" ] ; then
+	rm -rf "${deploy_root}"
+    fi
+
 	mkdir -p "${deploy_root}"
+
+    if [ ! -d "${prepare_root}" ] ; then
+	mkdir -p "${prepare_root}"
     fi
 }
 
@@ -183,30 +191,12 @@ generate_algod_tokens() {
 #
 generate_chainconfig() {
     local netroot="$1" ; shift
-    local datadir account mnemonic pid
+    local nodefile="$1" ; shift
+    local nodenum datadir account mnemonic pid
 
-    (
-	echo 'extra:'
-	echo '  - accounts:'
+    nodenum=$(cat "${nodefile}" | wc -l)
 
-	for datadir in "${netroot}/n"*/ ; do
-	    goal account list --datadir "${datadir}" | awk '{print $2}' \
-		| while read account ; do
-		echo "    - address:  ${account}"
-
-		mnemonic="$(goal account export --datadir "${datadir}" \
-                                                --address "${account}" \
-                            | tail -n1 | sed -r 's/^.*: "(.*)"$/\1/')"
-
-		echo "      mnemonic: ${mnemonic}"
-	    done
-
-	    pid=$(ps -eo pid,args | grep -v 'grep' | grep 'kmd' \
-		      | grep "${datadir}kmd-v" | awk '{print $1}')
-
-	    kill -TERM ${pid}
-	done
-    ) > "${deploy_root}/chain.yml"
+    algorand-chainfile-generator "${netroot}" "${nodenum}" "${netroot}/accounts.yaml"
 }
 
 # Generate an Algorand testnet specification in "$deploy_root/network" and a
@@ -243,22 +233,30 @@ generate() {
 	rm -rf "${netroot}"
     fi
 
-    if ! goal network create --rootdir "${netroot}" --network 'private' \
-	 --template "${template}" > "${logfile}" ; then
-	cat "${logfile}"
-	fatal "cannot generate network in '${netroot}'"
-    fi
+    local numnode=$(cat "${nodefile}" | wc -l)
+    local prepared_path="${prepare_root}/network-${numnode}"
 
-    kill_kmd_processes "${netroot}"
+    if [ ! -e "${prepared_path}" ] ; then
+        if ! goal network create --rootdir "${prepared_path}" --network 'private' \
+             --template "${template}" > "${logfile}" ; then
+            cat "${logfile}"
+            fatal "cannot generate network in '${prepared_path}'"
+        fi
+
+        kill_kmd_processes "${prepared_path}"
+        generate_chainconfig "${prepared_path}" "${nodefile}"
+        generate_algod_tokens "${prepared_path}" "${nodefile}"
+
+        rm "${prepared_path}/genesis.json"  # already in each node
+        rm "${prepared_path}/network.json"  # only used by goal network
+        rm "${prepared_path}/"*.rootkey*    # already in associated node
+        rm "${prepared_path}/"*.partkey*    # already in associated node
+    fi
+    cp -R "${prepared_path}" "${netroot}"
     set_goal_network_address "${netroot}" "${nodefile}"
     generate_start_scripts "${netroot}" "${nodefile}"
-    generate_algod_tokens "${netroot}" "${nodefile}"
-    generate_chainconfig "${netroot}"
 
-    rm "${netroot}/genesis.json"  # already in each node
-    rm "${netroot}/network.json"  # only used by goal network
-    rm "${netroot}/"*.rootkey     # already in associated node
-    rm "${netroot}/"*.partkey     # already in associated node
+    cp "${netroot}/accounts.yaml" "${deploy_root}/accounts.yaml"
 
     tar -C "${deploy_root}" -czf "${netroot}.tar.gz" 'network'
 }
