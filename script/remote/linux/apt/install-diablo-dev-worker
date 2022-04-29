@@ -14,9 +14,12 @@ fi
 
 # Install common utilities as well as golang if not yet installed.
 #
-if ! command -v 'make' > '/dev/null' ||  ! command -v 'go' > '/dev/null' \
-	|| ! command -v 'rsync' > '/dev/null'; then
-    sudo -n apt-get install -yy 'make' 'golang' 'rsync'
+if ! command -v 'make' > '/dev/null' \
+	|| ! command -v 'go' > '/dev/null' \
+	|| ! test -d '/usr/lib/go-1.16/bin' \
+	|| ! command -v 'rsync' > '/dev/null'
+then
+    sudo -n apt-get install -yy 'make' 'golang-1.16' 'rsync'
 fi
 
 # Create an install dir if not already there.
@@ -42,6 +45,8 @@ fi
 
 (
     cd 'install/diablo'
+
+    export PATH="/usr/lib/go-1.16/bin:${PATH}"
 
     # Avoid modification outside of this repository.
     # This is important because some other installed software could use

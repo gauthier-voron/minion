@@ -5,8 +5,8 @@
 
 set -e
 
-diablo_url='https://github.com/lebdron/diablo-benchmark.git'
-diablo_checkout='solana-sign-online'
+diablo_url='https://github.com/NatoliChris/diablo-benchmark.git'
+diablo_checkout='v2'
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
@@ -20,7 +20,8 @@ done
 
 # Install common utilities as well as golang.
 #
-sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' 'golang'
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' \
+     'golang-1.16'
 
 # Create an install dir if not already there.
 #
@@ -38,6 +39,8 @@ git clone "${diablo_url}" 'install/diablo'
 (
     cd 'install/diablo'
 
+    export PATH="/usr/lib/go-1.16/bin:${PATH}"
+
     git checkout "${diablo_checkout}"
 
     # Avoid modification outside of this repository.
@@ -46,5 +49,6 @@ git clone "${diablo_url}" 'install/diablo'
     #
     export GOPATH="${PWD}/go"
 
+    make reqs
     make diablo
 )
