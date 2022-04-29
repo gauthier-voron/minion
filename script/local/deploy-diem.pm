@@ -36,11 +36,15 @@ sub generate_setup
 	$tags = undef;
 
 	foreach $worker (@$workers) {
-	    if (!$worker->can('public_ip') || ($worker->public_ip() ne $ip)) {
+	    if ($worker->get('ssh:host') ne $ip) {
 		next;
 	    }
 
-	    $tags = $worker->region();
+	    if ($worker->can('region')) {
+		$tags = $worker->region();
+	    } else {
+		$tags = 'generic-region';
+	    }
 
 	    push(@{$groups{$tags}}, $line);
 	}
@@ -57,6 +61,8 @@ sub generate_setup
     }
 
     printf($ofh "interface: \"diem\"\n");
+    printf($ofh "\n");
+    printf($ofh "confirm: \"pollblk\"\n");
     printf($ofh "\n");
     printf($ofh "endpoints:\n");
 

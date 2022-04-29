@@ -267,11 +267,17 @@ sub generate_setup
     my ($nodes, $target) = @_;
     my ($ifh, $ofh, $line, $ip, $i, $port, $worker, %groups, $tags);
 
-	foreach $ip (keys(%$nodes)) {
+    foreach $ip (keys(%$nodes)) {
 	for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
-		$line = sprintf("%s:%d", $ip, $CLIENT_TCP_PORT + $i);
+	    $line = sprintf("%s:%d", $ip, $CLIENT_TCP_PORT + $i);
+
+	    if ($nodes->{$ip}->{'worker'}->can('region')) {
 		$tags = $nodes->{$ip}->{'worker'}->region();
-		push(@{$groups{$tags}}, $line);
+	    } else {
+		$tags = 'generic-region';
+	    }
+
+	    push(@{$groups{$tags}}, $line);
 	}
     }
 
@@ -280,6 +286,8 @@ sub generate_setup
     }
 
     printf($ofh "interface: \"algorand\"\n");
+    printf($ofh "\n");
+    printf($ofh "confirm: \"pollblk\"\n");
     printf($ofh "\n");
     printf($ofh "endpoints:\n");
 
@@ -382,7 +390,7 @@ sub deploy_algorand
     system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
 	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
-	generate_setup($nodes, $ALGORAND_PATH . '/setup.yaml');
+    generate_setup($nodes, $ALGORAND_PATH . '/setup.yaml');
 
     dispatch($nodes, $NETWORK_PATH);
 

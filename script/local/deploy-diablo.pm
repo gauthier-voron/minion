@@ -313,7 +313,7 @@ sub specialize_workload
 
 sub deploy_diablo
 {
-    my ($nodes, $ip, $primary, @secondaries, $proc, @procs, @stats);
+    my ($nodes, $ip, $primary, @secondaries, $proc, @procs, @stats, $region);
 
     if (!(-e $ROLES_PATH)) {
 	return 1;
@@ -340,11 +340,16 @@ sub deploy_diablo
 
     foreach $ip (keys(%$nodes)) {
 	if ($nodes->{$ip}->{'secondaries'} > 0) {
+	    if ($nodes->{$ip}->{'worker'}->can('region')) {
+		$region = $nodes->{$ip}->{'worker'}->region();
+	    } else {
+		$region = 'generic-region';
+	    }
+
 	    $proc = $RUNNER->run(
 		$nodes->{$ip}->{'worker'},
 		[ 'deploy-diablo-worker', 'secondary',
-		  $primary . ':' . $PRIMARY_TCP_PORT,
-		  $nodes->{$ip}->{'worker'}->region(),
+		  $primary . ':' . $PRIMARY_TCP_PORT, $region,
 		  $nodes->{$ip}->{'secondaries'} ]
 		);
 	    push(@procs, $proc);

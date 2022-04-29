@@ -15,6 +15,7 @@ script_name='diablo-worker'
 install_root="${HOME}/install/diablo"
 solidity_root="${HOME}/install/solidity"
 solang_root="${HOME}/install/solang"
+move_root="${HOME}/install/move"
 deploy_root="${HOME}/deploy/diablo"
 
 
@@ -53,8 +54,12 @@ setup_environment() {
 	export PATH="${solidity_root}/build/solc/:${PATH}"
     fi
 
-	if [ -d "${solang_root}" ] ; then
+    if [ -d "${solang_root}" ] ; then
 	export PATH="${solang_root}/target/release:${PATH}"
+    fi
+
+    if [ -d "${move_root}" ] ; then
+	export PATH="${move_root}/target/debug:${PATH}"
     fi
 }
 
@@ -88,6 +93,8 @@ start_primary() {
     diablo primary \
 	   -vvv \
 	   --env="accounts=${dir}/accounts.yaml" \
+	   --env="contracts=move-contracts" \
+	   --env="contracts=teal-contracts" \
 	   --port=${port} \
 	   --output="${dir}/results.json" \
 	   --compress --stat \

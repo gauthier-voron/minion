@@ -11,6 +11,7 @@
 #
 
 set -e
+set -x
 
 script_name='algorand'
 install_root="${HOME}/install/algorand"
