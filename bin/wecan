@@ -1,0 +1,660 @@
+#!/usr/bin/perl
+
+use lib qw(. ./lib);
+use strict;
+use warnings;
+
+use File::Temp qw(tempfile tempdir);
+use Getopt::Long qw(GetOptionsFromArray);
+use IO::Uncompress::Gunzip qw(gunzip);
+use JSON qw(decode_json encode_json);
+use List::Util qw(sum);
+use YAML;
+
+use Minion::Run::Runner;
+use Minion::Ssh;
+use Minion::System::Pgroup;
+
+
+sub benchmark
+{
+    my ($workload, $workers, $id, $contract, $output) = @_;
+    my ($pair, $worker, $roles, $blockchain, %results, $result);
+    my ($primary, $secondaries, $chain);
+
+    $primary = undef;
+    $secondaries = [];
+    $chain = [];
+
+    foreach $pair (@$workers) {
+	($worker, $roles) = @$pair;
+
+	if (grep { $_ eq 'primary' } @$roles) {
+	    $primary = $worker;
+	}
+
+	if (grep { $_ eq 'secondary' } @$roles) {
+	    push(@$secondaries, $worker);
+	}
+
+	if (grep { $_ eq 'chain' } @$roles) {
+	    push(@$chain, $worker);
+	}
+    }
+
+    foreach $blockchain (qw(algorand diem)) {
+	$result = benchmark_blockchain
+	    ($blockchain, $workload, $primary, $secondaries, $chain);
+	$results{$blockchain} = $result;
+    }
+
+    encode_results($id, $contract, \%results, $output);
+}
+
+sub benchmark_blockchain
+{
+    my ($blockchain, $workload, $primary, $secondaries, $chain) = @_;
+    my ($runner, $worker, $all, $diablo, $path);
+
+    $runner = Minion::Run::Runner->new(
+	LOCAL  => [ 'script/local/'  ],
+	REMOTE => [ 'script/remote/' ]
+	);
+
+    $all = {};
+    $diablo = {};
+
+    foreach $worker ($primary, @$secondaries) {
+	$diablo->{$worker} = $worker;
+	$all->{$worker} = $worker;
+    }
+
+    foreach $worker (@$chain) {
+	$all->{$worker} = $worker;
+    }
+
+    $all = [ values(%$all) ];
+    $diablo = [ values(%$diablo) ];
+
+    $runner->run($chain, [ $blockchain, 'stop' ])->wait();
+
+    if ($runner->run([ $primary ],
+		     [ 'behave-diablo', 'primary', $workload ])->wait() != 0) {
+	fatal("failed to register diablo primary");
+    }
+
+    if ($runner->run($secondaries,
+		     [ 'behave-diablo', 'secondary' ])->wait() != 0) {
+	fatal("failed to register diablo secondaries");
+    }
+
+    if ($runner->run($chain, [ 'behave-' . $blockchain ])->wait() != 0) {
+	fatal("failed to register blockchain nodes");
+    }
+
+
+    if ($runner->run($all, [ 'deploy' ])->wait() != 0) {
+	fatal("failed to deploy");
+    }
+
+    if ($runner->run($chain, [ $blockchain, 'start' ])->wait() != 0) {
+	fatal("failed to start blockchain");
+    }
+
+    if ($runner->run($diablo, [ 'diablo', 'start' ])->wait() != 0) {
+	fatal("failed to start diablo");
+    }
+
+    if ($runner->run($diablo, [ 'diablo', 'wait' ])->wait() != 0) {
+	fatal("failed to wait diablo");
+    }
+
+    if ($runner->run($chain, [ $blockchain, 'stop' ])->wait() != 0) {
+	fatal("failed to stop blockchain");
+    }
+
+
+    $path = tempdir('wecan-result.XXXXXX', SUFFIX => '.d', CLEANUP => 1);
+
+    if ($primary->recv([ 'deploy/diablo/primary/results.json.gz' ],
+		       TARGET => $path)->wait() != 0) {
+	fatal("failed to receive results");
+    }
+
+    if (!gunzip($path . '/results.json.gz' => $path . '/results.json')) {
+	fatal("failed to decompress results");
+    }
+
+    return ($path . '/results.json');
+}
+
+sub install
+{
+    my ($workers) = @_;
+    my ($runner, $pair, $worker, $all, $proc, $grp);
+
+    $all = [];
+
+    foreach $pair (@$workers) {
+	($worker, $_) = @$pair;
+	push(@$all, $worker);
+    }
+
+    $runner = Minion::Run::Runner->new(
+	LOCAL  => [ 'script/local/'  ],
+	REMOTE => [ 'script/remote/' ]
+	);
+
+    if ($runner->run($all, [ 'prepare-install' ])->wait() != 0) {
+	fatal("failed to prepare install");
+    }
+
+    if ($runner->run($all, [ 'install-diablo' ])->wait() != 0) {
+	fatal("failed to install diablo");
+    }
+
+    if ($runner->run($all, [ 'install-algorand' ])->wait() != 0) {
+	fatal("failed to install algorand");
+    }
+
+    if ($runner->run($all, [ 'install-diem' ])->wait() != 0) {
+	fatal("failed to install diem");
+    }
+
+    $grp = Minion::System::Pgroup->new([]);
+
+    foreach $worker (@$all) {
+	$proc = $worker->send([ 'move-contracts', 'teal-contracts' ]);
+	$grp->add($proc);
+    }
+
+    if (grep { $_->exitstatus() != 0 } $grp->waitall()) {
+	fatal("failed to upload smart contracts");
+    }
+}
+
+sub encode_results
+{
+    my ($id, $contract, $results, $output) = @_;
+    my ($blockchain, $input, @results, $data, $fh);
+
+    while (($blockchain, $input) = each(%$results)) {
+	push(@results, {
+	    'blockChain' => $blockchain,
+	    'data' => encode_result($input)
+	});
+    }
+
+    $data = {
+	'loadFileId' => $id,
+	'output' => \@results
+    };
+
+    if (defined($contract)) {
+	$data->{'contract'} = $contract;
+    }
+
+    # $data = encode_json($data);
+    $data = JSON->new()->ascii()->pretty()->encode($data);
+
+    if (!open($fh, '>', $output)) {
+	fatal("cannot open output file '%s' : %s", $output, $!);
+    }
+
+    printf($fh "%s", $data);
+
+    close($fh);
+}
+
+sub encode_result
+{
+    my ($input) = @_;
+    my ($fh, $data, $loc, $client, $interact, $submit, $commit, $lasttime, $i);
+    my (@latencies, $avglat, $medlat, $lat90, $lat99, $avgthr, $medthr);
+    my (%thrsec, $result);
+
+    if (!open($fh, '<', $input)) {
+	fatal("failed to open results file '%s'", $input);
+    } else {
+	local $/ = undef;
+	$data = <$fh>;
+	close($fh);
+    }
+
+    $data = decode_json($data);
+
+    foreach $loc (@{$data->{'Locations'}}) {
+	foreach $client (@{$loc->{'Clients'}}) {
+	    foreach $interact (@{$client->{'Interactions'}}) {
+		$submit = $interact->{'SubmitTime'};
+		$commit = $interact->{'CommitTime'};
+
+		if (!defined($lasttime) || ($submit > $lasttime)) {
+		    $lasttime = $submit;
+		}
+
+		if ($commit > $lasttime) {
+		    $lasttime = $commit;
+		}
+
+		if (($submit < 0) || ($commit < 0)) {
+		    next;
+		}
+
+		push(@latencies, $commit - $submit);
+		$thrsec{int($commit)} += 1;
+	    }
+	}
+    }
+
+    for ($i = 0; $i < $lasttime; $i++) {
+	if (!exists($thrsec{$i})) {
+	    $thrsec{$i} = 0;
+	}
+    }
+
+    if (scalar(@latencies) == 0) {
+	$avglat = 0;
+	$medlat = 0;
+	$lat90 = 0;
+	$lat99 = 0;
+	$avgthr = 0;
+	$medthr = 0;
+    } else {
+	@latencies = sort { $a <=> $b } @latencies;
+	$avglat = int((sum(@latencies) / scalar(@latencies)) * 1000);
+	$medlat = int(($latencies[int(scalar(@latencies) / 2)]) * 1000);
+	$lat90 = int(($latencies[9 * int(scalar(@latencies) / 10)]) * 1000);
+	$lat99 = int(($latencies[99 * int(scalar(@latencies) / 100)]) * 1000);
+	$avgthr = scalar(@latencies) / $lasttime;
+	$medthr = $thrsec{(sort { $thrsec{$a} <=> $thrsec{$b} }
+			   keys(%thrsec))[int(scalar(%thrsec) / 2)]};
+    }
+
+    $result = [
+	{
+	    'id' => 'average-latency',
+	    'title' => 'Average Latency',
+	    'description' => 'The average latency of the committed transactions in ms. 0 if no committed transaction.',
+	    'unit' => 'ms',
+	    'type' => 'int',
+	    'value' => $avglat
+	},
+	{
+	    'id' => 'median-latency',
+	    'title' => 'Median Latency',
+	    'description' => 'The latency of the 50%th fastest transaction in ms. 0 if no committed transaction.',
+	    'unit' => 'ms',
+	    'type' => 'int',
+	    'value' => $medlat
+	},
+	{
+	    'id' => '90th-latency',
+	    'title' => '90th Latency',
+	    'description' => 'The latency of the 90%th fastest transaction in ms. 0 if no committed transaction.',
+	    'unit' => 'ms',
+	    'type' => 'int',
+	    'value' => $lat90
+	},
+	{
+	    'id' => '99th-latency',
+	    'title' => '99th Latency',
+	    'description' => 'The latency of the 99%th fastest transaction in ms. 0 if no committed transaction.',
+	    'unit' => 'ms',
+	    'type' => 'int',
+	    'value' => $lat99
+	},
+	{
+	    'id' => 'average-throughput',
+	    'title' => 'Average Throughput',
+	    'description' => 'The average throughput in committed tx per second. 0 if not committed transaction.',
+	    'unit' => 'tx/s',
+	    'type' => 'float',
+	    'value' => $avgthr
+	},
+	{
+	    'id' => 'median-throughput',
+	    'title' => 'Median Throughput',
+	    'description' => 'The throughput during the 50%th most active second (i.e. the second with the highest throughput). 0 if not committed transaction.',
+	    'unit' => 'tx/s',
+	    'type' => 'float',
+	    'value' => $medthr
+	},
+	{
+	    'id' => 'energy',
+	    'title' => 'Energy',
+	    'description' => 'The number of watt-hour consumed by the blockchain during a run. 0 if the blockchain did nothing.',
+	    'unit' => 'Wh',
+	    'type' => 'int',
+	    'value' => 0
+	},
+	{
+	    'id' => 'disk-usage',
+	    'title' => 'Disk Usage',
+	    'description' => 'The number of additional bytes reserved on disk during a run. 0 or less if the blockchain does compression.',
+	    'unit' => 'B',
+	    'type' => 'int',
+	    'acceptsMetricPrefix' => \1,
+	    'value' => 0
+	},
+	{
+	    'id' => 'latency-scalability-score',
+	    'title' => 'Latency Scalability',
+	    'description' => 'The ratio between the average latency on big system size and small system size.',
+	    'unit' => '',
+	    'type' => 'ratio',
+	    'value' => 1
+	},
+	{
+	    'id' => 'throughput-scalability-score',
+	    'title' => 'Throughput Scalability',
+	    'description' => 'The ratio between the average throughput on big system size and small system size.',
+	    'unit' => '',
+	    'type' => 'ratio',
+	    'value' => 1
+	},
+	{
+	    'id' => 'partition-liveness-score',
+	    'title' => 'Partition Liveness',
+	    'description' => 'The proportion of request during the partition compared to the requests committed before the partition.',
+	    'unit' => '',
+	    'type' => 'ratio',
+	    'value' => 0
+	},
+	{
+	    'id' => 'partition-safety',
+	    'title' => 'Partition Safety',
+	    'description' => 'Indicate if the blockchain has forked or deleted transactions during or after the partition.',
+	    'unit' => '',
+	    'type' => 'boolean',
+	    'value' => \1
+	},
+    ];
+
+    return $result;
+}
+
+sub create_workers
+{
+    my ($setup) = @_;
+    my (@workers, $worker, $node, $user, $ip, $roles);
+    my ($grp, $proc, @event, @failed);
+
+    $grp = Minion::System::Pgroup->new([]);
+
+    foreach $node (@$setup) {
+	($user, $ip, $roles) = @$node;
+
+	$worker = Minion::Ssh->new($ip, USER => $user, LOG => \*STDERR);
+	push(@workers, [ $worker, $roles ]);
+
+    	$proc = $worker->execute([ 'true' ]);
+	$grp->add([ $proc, $user, $ip ]);
+    }
+
+    while (scalar(@event = $grp->wait()) > 0) {
+	($proc, $user, $ip) = @event;
+
+	if ($proc->exitstatus() != 0) {
+	    push(@failed, [ $user, $ip ]);
+	}
+    }
+
+    if (scalar(@failed) > 0) {
+	fatal("failed to join workers: %s",
+	      join(', ', map { join('@', @$_) } @failed));
+    }
+
+    return \@workers;
+}
+    
+sub read_nodes
+{
+    my ($input) = @_;
+    my ($fh, $line, $user, $ip, $roles, $primary);
+    my ($output, $chain, $secondaries);
+
+    if (!open($fh, '<', $input)) {
+	fatal("cannot read ip file '%s'", $input);
+    }
+
+    $output = [];
+    $primary = undef;
+    $secondaries = 0;
+    $chain = 0;
+
+    while (defined($line = <$fh>)) {
+	chomp($line);
+
+	if ($line =~ /^([^@]+)@([^=]*[^=\s])\s*=\s*((?:primary|secondary|chain)(?:\s*,\s*(?:primary|secondary|chain))*)\s*$/) {
+	    ($user, $ip, $roles) = ($1, $2, $3);
+	} else {
+	    fatal("invalid syntax in '%s': '%s'", $input, $line);
+	}
+
+	$roles =~ s/\s+//g;
+
+	if ($roles =~ /primary/) {
+	    if (defined($primary)) {
+		fatal("primary defined twice: '%s' and '%s'", $primary, $line);
+	    }
+
+	    $primary = $line;
+	}
+
+	if ($roles =~ /secondary/) {
+	    $secondaries += 1;
+	}
+
+	if ($roles =~ /chain/) {
+	    $chain += 1;
+	}
+
+	push(@$output, [ $user, $ip, [ split(',', $roles) ] ]);
+    }
+
+    close($fh);
+
+    return ($output, $chain, $secondaries);
+}
+
+sub convert_workload
+{
+    my ($input, $chain, $secondaries) = @_;
+    my ($fh, $path, $document, $timestamp, $load, $name, $function);
+
+    eval {
+	$document = YAML::LoadFile($input);
+    };
+
+    if ($@) {
+	fatal("cannot load workload '%s'", $input);
+    }
+
+    if (ref($document) ne 'HASH') {
+	fatal("invalid syntax in '%s': not a dictionary", $input);
+    } elsif (!exists($document->{'id'})) {
+	fatal("invalid syntax in '%s': no 'id' field", $input);
+    } elsif (ref($document->{'id'}) ne '') {
+	fatal("invalid syntax in '%s': 'id' is not a string", $input);
+    } elsif (!exists($document->{'txs'})) {
+	fatal("invalid syntax in '%s': no 'txs' field", $input);
+    } elsif (ref($document->{'txs'}) ne 'HASH') {
+	fatal("invalid syntax in '%s': 'txs' is not a dictionary", $input);
+    }
+
+    ($fh, $path) = tempfile('wecan-workload.XXXXXX', SUFFIX => '.yaml',
+			    UNLINK => 1);
+
+    printf($fh <<"EOF");
+let:
+  - !loop &loc { sample: !location [ ".*" ] }
+  - &end { sample: !endpoint [ ".*" ] }
+  - !loop &acc { sample: !account { number: $chain, stake: 1000 } }
+EOF
+
+    if (exists($document->{'contract'})) {
+	if (ref($document->{'contract'}) ne '') {
+	    fatal("invalid syntax in '%s': 'contract' is not a string",$input);
+	}
+
+	if ($document->{'contract'} =~ /^([^:]+):(.*)$/) {
+	    ($name, $function) = ($1, $2);
+	} else {
+	    fatal("invalid contract name: '%s'", $document->{'contract'});
+	}
+
+	printf($fh <<"EOF");
+  - &dapp { sample: !contract { name: "$name" } }
+EOF
+    }
+    
+    printf($fh <<"EOF");
+workloads:
+  - number: $secondaries
+    client:
+      location: *loc
+      view: *end
+      behavior:
+        - load:
+EOF
+
+    foreach $timestamp (sort { $a <=> $b } keys(%{$document->{'txs'}})) {
+	$load = $document->{'txs'}->{$timestamp};
+
+	if ($timestamp !~ /^\d+(:?\.\d*)?$/) {
+	    fatal("invalid syntax in '%s': invalid timestamp '%s'", $input,
+		$timestamp);
+	} elsif ($load !~ /^\d+(:?\.\d*)?$/) {
+	    fatal("invalid syntax in '%s': invalid load '%s'", $input, $load);
+	}
+
+	$load /= $secondaries;
+
+	printf($fh <<"EOF");
+            $timestamp: $load
+EOF
+    }
+
+    if (exists($document->{'contract'})) {
+	printf($fh <<"EOF");
+          interaction: !invoke
+            from: *acc
+            contract: *dapp
+            function: "$function()"
+EOF
+    } else {
+	printf($fh <<'EOF');
+          interaction: !transfer
+            from: *acc
+            to: *acc
+EOF
+    }
+
+    return ($path, $document->{'id'}, $document->{'contract'});
+}
+
+sub fatal
+{
+    my ($format, @args) = @_;
+
+    printf(STDERR "%s: " . $format . "\n", $0, @args);
+    printf(STDERR "Please type '%s --help' for more information\n", $0);
+
+    exit (1);
+}
+
+sub usage
+{
+    return <<"EOF";
+Usage: $0 [--skip-install] <workload-file> <ip-file> <output-file>
+
+***
+This is a prototype script.
+It contains bugs and should not be used in production .
+***
+
+Run the benchmark specified in <workload-file> on the machines specified in
+<ip-file> and produce an evaluation output in <output-file>.
+Unless the '--skip-install' option is specified, start by installing the
+benchmark platform and the blockchains on the benchmark machines.
+The installation may take some time.
+
+Benchmarked blockchains:
+
+  - algorand
+  - diem
+
+Possible contracts:
+
+  - counter:add
+  - dota:update
+  - gafam:buy
+  - microsoft:buy
+  - uber:find
+  - youtube:upload
+
+Setup file syntax:
+
+  <ssh-user0>@<ip0> = <roles>
+  <ssh-user1>@<ip1> = <roles>
+  ...
+
+Where <roles> is a coma separated list of roles among:
+
+  - primary        the benchmark controler (must be unique)
+  - secondary      a benchmark worker
+  - chain          a blockchain node
+
+EOF
+}
+
+sub main
+{
+    my ($workload, $setup, $output, @err);
+    my ($id, $chain, $contract, $secondaries, $workers, $skip_install);
+
+    GetOptionsFromArray(
+	\@_,
+	'h|help' => sub { printf("%s", usage()); exit (0); },
+	'skip-install' => \$skip_install
+	);
+
+    ($workload, $setup, $output, @err) = @_;
+
+    if (!defined($workload)) {
+	fatal('missing <workload-file> operand');
+    } elsif (!defined($setup)) {
+	fatal('missing <ip-file> operand');
+    } elsif (!defined($output)) {
+	fatal('missing <output-file> operand');
+    } elsif (-e $output) {
+	fatal("output file '%s' already exists", $output);
+    } elsif (@err) {
+	fatal("unexpected operand: '%s'", shift(@err));
+    }
+
+    ($setup, $chain, $secondaries) = read_nodes($setup);
+    ($workload, $id, $contract) =
+	convert_workload($workload, $chain, $secondaries);
+    $workers = create_workers($setup);
+
+    system('cat', $workload);
+
+    if (!$skip_install) {
+	install($workers);
+    }
+
+    benchmark($workload, $workers, $id, $contract, $output);
+
+    return 0;
+
+    # encode_results($id, {
+    # 	'algorand' => 'wecan-result.O_n4lb/results.json',
+    # 	'diem' => 'wecan-result.jw4uMB/results.json'
+    # 	}, $output);
+}
+
+
+exit (main(@ARGV));
+__END__
