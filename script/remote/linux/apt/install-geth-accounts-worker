@@ -7,31 +7,11 @@
 
 set -e
 
-if ! command -v 'sudo' > '/dev/null' ; then
-    echo "Cannot find command 'sudo'" >&2
-    exit 1
-fi
-
-
 number="$1"
 
 if [ "x${number}" = 'x' ] ; then
     number=2
 fi
-
-
-# Install a tool to add the ethereum PPA repository
-#
-sudo -n apt-get install -yy 'software-properties-common'
-
-# Add the ethereum PPA repository
-#
-sudo add-apt-repository -yy 'ppa:ethereum/ethereum'
-
-# Install geth and python (for private key extraction)
-#
-sudo -n apt-get install -yy 'geth' 'python3' 'python3-pip'
-pip3 install 'web3'
 
 # Create an install dir if not already there.
 #
@@ -51,83 +31,56 @@ if [ ! -e 'install/geth-accounts' ] ; then
     mkdir 'install/geth-accounts'
 fi
 
+golang_version='1.17.9'
+golang_url="https://go.dev/dl/go${golang_version}.linux-$(dpkg --print-architecture).tar.gz"
 
-# Generate the extraction script.
-# Geth stores private keys encrypted with a password.
-# We want to use the private key unencrypted in Diablo so we need to extract
-# the key and store it in hexadecimal format.
-#
-cat > 'install/geth-accounts/extract.py' <<EOF
-#!/usr/bin/env python3
+if [ ! -e "install/go${golang_version}" ] ; then
+	curl -L "${golang_url}" | tar --one-top-level="install/go${golang_version}" --strip-components=1 -xzf -
+fi
+export PATH="${PWD}/install/go${golang_version}/bin:${PATH}"
 
-import binascii
-import sys
-from web3.auto import w3
+cd 'install/geth-accounts'
+cat > 'main.go' <<'EOF'
+package main
 
-keypath = sys.argv[1]
-password = sys.argv[2]
+import (
+	"fmt"
+	"log"
+	"os"
+	"strconv"
 
-with open(keypath) as keyfile:
-    encrypted_key = keyfile.read()
-    private_key   = w3.eth.account.decrypt(encrypted_key, password)
-    formatted_key = binascii.b2a_hex(private_key).decode('ascii')
-    print (formatted_key)
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
+)
+
+func main() {
+	num, err := strconv.Atoi(os.Args[1])
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for i := 0; i < num; i++ {
+		privateKey, err := crypto.GenerateKey()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		private := hexutil.Encode(crypto.FromECDSA(privateKey))[2:]
+		address := crypto.PubkeyToAddress(privateKey.PublicKey).Hex()[2:]
+		fmt.Printf("%s:%s\n", address, private)
+	}
+}
 EOF
-chmod 755 'install/geth-accounts/extract.py'
+chmod 755 'main.go'
 
+export GOPATH="${PWD}/go"
 
-# Generate accounts in the account directory.
-# Also exteact the key to a simple hex unencrypted format.
-#
-batch=$(cat '/proc/cpuinfo' | grep '^processor' | wc -l)
-total=0
-while [ ${total} -lt ${number} ] ; do
-    len=$(( number - total ))
-    if [ ${batch} -lt ${len} ] ; then
-	len=${batch}
-    fi
-    upto=$(( total + len - 1 ))
+go mod init "geth-accounts"
 
-    for i in $(seq ${total} ${upto}) ; do
-	(
-	    mkdir "install/geth-accounts/${i}"
+go get github.com/ethereum/go-ethereum
 
-	    if ! printf "%d\n%d\n" ${i} ${i} | \
-		    geth --datadir install/geth-accounts/"${i}" account new \
-			 > '/dev/null' 2> "install/geth-accounts/${i}.log"
-	    then
-		cat "install/geth-accounts/${i}.log" >&2
-	    fi
+go mod tidy
 
-	    rm "install/geth-accounts/${i}.log"
+go run main.go "${number}" > 'accounts.txt'
 
-	    keypath="$(ls -1 "install/geth-accounts/${i}/keystore/"|head -n1)"
-	    keypath="install/geth-accounts/${i}/keystore/${keypath}"
-	    address="${keypath##*--}"
-
-	    echo "${address}" > "install/geth-accounts/${i}/address"
-
-	    ./install/geth-accounts/extract.py "${keypath}" ${i} \
-		> "install/geth-accounts/${i}/private"
-
-	    rm -rf "install/geth-accounts/${i}/keystore"
-	) &
-    done
-
-    wait
-
-    total=$(( upto + 1 ))
-
-    echo "Account generation: ${total} / ${number}"
-done
-
-# Gather every address and private key in a single text file
-#
-(
-    for i in $(seq 0 $(( number - 1 ))) ; do
-	address="$(cat "install/geth-accounts/${i}/address")"
-	private="$(cat "install/geth-accounts/${i}/private")"
-	printf "%s:%s\n" "${address}" "${private}"
-	rm -rf "install/geth-accounts/${i}"
-    done
-) > 'install/geth-accounts/accounts.txt'
+go clean --cache

@@ -60,7 +60,7 @@ sub generate_json_accounts
     while (defined($line = <$rfh>)) {
 	chomp($line);
 
-	if ($line !~ /^([0-9a-f]+):([0-9a-f]+)$/) {
+	if ($line !~ /^([0-9a-fA-F]+):([0-9a-f]+)$/) {
 	    die ("accounts file '$txtpath' must be in format " .
 		 "'hexaddress:hexprivate");
 	}
@@ -240,4 +240,3 @@ if (defined($from)) {
     generate_accounts($number);
 }
 __END__
-
