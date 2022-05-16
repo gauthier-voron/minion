@@ -303,6 +303,8 @@ finalize() {
 	test -d "${dir}/keystore" || continue
 
 	cp "${static}" "${dir}/static-nodes.json"
+
+	rm "${dir}/geth/LOCK" || true
     done
 }
 
