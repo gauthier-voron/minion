@@ -42,7 +42,7 @@ my $LIBRA_CHAIN_PATH = $SHARED . '/libra/chain.yaml';
 my $POA_PATH = $SHARED . '/poa';
 my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
 my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
-my $SOLANA_CHAIN_PATH = $SHARED . '/solana/chain.yaml';
+my $SOLANA_PATH = $SHARED . '/solana';
 my $AVALANCHE_CHAIN_PATH = $SHARED . '/avalanche/chain.yaml';
 
 
@@ -279,7 +279,14 @@ sub deploy_diablo_quorum_raft
 
 sub deploy_diablo_solana
 {
-    return deploy_diablo_chain(@_, $SOLANA_CHAIN_PATH);
+    my ($nodes) = @_;
+    my ($primary);
+
+    ($primary) = map { $nodes->{$_}->{'worker'} }
+                 grep { $nodes->{$_}->{'primary'} > 0 }
+                 keys(%$nodes);
+
+    return deploy_diablo_primary($primary, $SOLANA_PATH);
 }
 
 sub deploy_diablo_avalanche
@@ -410,8 +417,8 @@ sub deploy_diablo
 	return deploy_diablo_quorum_raft($nodes, $primary, \@secondaries);
     }
 
-	if (-f $SOLANA_CHAIN_PATH) {
-	return deploy_diablo_solana($nodes, $primary, \@secondaries);
+	if (-f ($SOLANA_PATH . '/setup.yaml')) {
+	return deploy_diablo_solana($nodes);
     }
 
 	if (-f $AVALANCHE_CHAIN_PATH) {

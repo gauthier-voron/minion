@@ -102,7 +102,6 @@ generate_genesis() {
     nodenum=$(cat "${nodefile}" | wc -l)
     dir="${netroot}/n0"
     configdir="${dir}/config"
-    gunzip -k "${keyfile}.gz" || true
     args=(--primordial-accounts-file "${HOME}/${keyfile}")
 
     for i in $(seq 2 ${nodenum}) ; do
@@ -120,7 +119,6 @@ generate_genesis() {
         export BOOTSTRAP_VALIDATOR_VOTE_KEYPAIR="${configdir}/vote-account.json"
         multinode-demo/setup.sh "${args[@]}"
     )
-    rm "${keyfile}"
 
     solana-ledger-tool -l "$configdir"/bootstrap-validator create-snapshot 0 "$configdir"/bootstrap-validator --warp-slot 1
     solana-ledger-tool -l "$configdir"/bootstrap-validator shred-version --max-genesis-archive-unpacked-size 1073741824 | tee "$configdir"/shred-version

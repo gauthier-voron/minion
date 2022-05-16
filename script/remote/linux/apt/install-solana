@@ -115,6 +115,4 @@ EOF
     go run 'main.go' accounts.yaml 50000000000 10000
     sed -i '1d' accounts.yaml
     echo "" >> accounts.yaml
-
-    gzip accounts.yaml
 )
