@@ -281,6 +281,9 @@ sub generate_setup
 
     printf($ofh "interface: \"algorand\"\n");
     printf($ofh "\n");
+    printf($ofh "parameters:\n");
+	printf($ofh "  confirm: \"pollblk\"\n");
+	printf($ofh "\n");
     printf($ofh "endpoints:\n");
 
     foreach $tags (keys(%groups)) {

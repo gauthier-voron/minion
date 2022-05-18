@@ -9,7 +9,7 @@ CLIENT_PORT=9000
 ACCOUNTS=130
 
 script_name='deploy-diem-worker'
-install_root="${HOME}/install/libra"
+install_root="${HOME}/install/diem"
 deploy_root="${HOME}/deploy/diem"
 prepare_root="${HOME}/prepare/diem"
 behaviors_path="${MINION_SIMD_DIR}/${MINION_SIMD_ID}/behaviors.txt"
@@ -271,6 +271,8 @@ generate_network_with() {
     initlogs="$(mktemp --suffix='.log' --tmpdir "diem-swarm.XXXXXX")"
 
     (
+    sleep 20  # otherwise, faucet fails to mint
+ 	printf "dev enable_custom_script\n"
 	for i in $(seq 0 $(( numaccount - 1 ))) ; do
 	    printf "account create\n"
 	    printf "account mint %d 1000000 XUS\n" ${i}
@@ -278,7 +280,7 @@ generate_network_with() {
 	printf "account list\n"
 	printf "account write ${target}/wallet\n"
     ) | \
-    diem-swarm --num-nodes ${numnode} --config-dir "${target}" \
+    nice diem-swarm --num-nodes ${numnode} --config-dir "${target}" \
                --diem-node "$(which 'diem-node')" \
 	       --start-client --cli-path "$(which 'cli')" \
 	       2>&1 | tee "${initlogs}"
@@ -286,7 +288,7 @@ generate_network_with() {
     setup_paths "${target}" ${numnode}
     setup_waypoint "${target}"
     setup_enodes "${target}" ${numnode}
-    
+
     generate_accounts_file "${initlogs}" "${target}/accounts.yaml"
     rm "${initlogs}"
 
