@@ -13,6 +13,23 @@ solidity_url='https://github.com/ethereum/solidity.git'
 # solidity_checkout='develop'
 solidity_checkout='v0.7.6'
 
+# Create an install dir if not already there.
+#
+if [ ! -e 'install' ] ; then
+    mkdir 'install'
+fi
+
+arch=$(uname -m)
+if [[ $arch = x86_64 ]]; then
+    mkdir -p 'install/solidity/build/solc'
+
+    curl -L "https://github.com/ethereum/solidity/releases/download/${solidity_checkout}/solc-static-linux" -o 'install/solidity/build/solc/solc'
+
+    chmod +x 'install/solidity/build/solc/solc'
+
+    exit 0
+fi
+
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
     exit 1
@@ -21,12 +38,6 @@ fi
 # Install common utilities.
 #
 sudo -n apt-get install -yy 'cmake' 'gcc' 'git' 'libboost-all-dev' 'make'
-
-# Create an install dir if not already there.
-#
-if [ ! -e 'install' ] ; then
-    mkdir 'install'
-fi
 
 # Clone Solidity from the official repository and build it.
 #
