@@ -259,6 +259,8 @@ generate() {
     cp "${netroot}/accounts.yaml" "${deploy_root}/accounts.yaml"
 
     tar -C "${deploy_root}" -czf "${netroot}.tar.gz" 'network'
+
+    rm -rf "${netroot}"
 }
 
 

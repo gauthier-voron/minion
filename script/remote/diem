@@ -3,7 +3,7 @@
 set -e
 set -x
 
-install_root="${HOME}/install/libra"
+install_root="${HOME}/install/diem"
 deploy_root="${HOME}/deploy/diem"
 
 test -e "${install_root}"
@@ -31,6 +31,7 @@ case "$1" in
 	;;
     'kill')
 	for dir in "${deploy_root}/"* ; do
+		test -f "${dir}/pid" || continue
 	    pid="$(cat "${dir}/pid")" || continue
 	    kill -KILL ${pid} 2> '/dev/null' || continue
 	    rm "${dir}/pid"
@@ -38,6 +39,7 @@ case "$1" in
 	;;
     'stop')
 	for dir in "${deploy_root}/"* ; do
+		test -f "${dir}/pid" || continue
 	    pid="$(cat "${dir}/pid")" || continue
 	    kill -INT ${pid} 2> '/dev/null' || continue
 	done

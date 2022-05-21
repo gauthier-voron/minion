@@ -39,11 +39,11 @@ my $KEYS_LOC = $DEPLOY . '/keys.json';
 my $ALGORAND_PATH = $SHARED . '/algorand';
 my $DIEM_PATH = $SHARED . '/diem';
 my $LIBRA_CHAIN_PATH = $SHARED . '/libra/chain.yaml';
-my $POA_CHAIN_PATH = $SHARED . '/poa/chain.yaml';
-my $QUORUMIBFT_CHAIN_PATH = $SHARED . '/quorum-ibft/chain.yaml';
+my $POA_PATH = $SHARED . '/poa';
+my $QUORUMIBFT_PATH = $SHARED . '/quorum-ibft';
 my $QUORUMRAFT_CHAIN_PATH = $SHARED . '/quorum-raft/chain.yaml';
-my $SOLANA_CHAIN_PATH = $SHARED . '/solana/chain.yaml';
-my $AVALANCHE_CHAIN_PATH = $SHARED . '/avalanche/chain.yaml';
+my $SOLANA_PATH = $SHARED . '/solana';
+my $AVALANCHE_PATH = $SHARED . '/avalanche';
 
 
 # Extract from the given $path the Quorum nodes.
@@ -257,12 +257,26 @@ sub deploy_diablo_libra
 
 sub deploy_diablo_poa
 {
-    return deploy_diablo_chain(@_, $POA_CHAIN_PATH);
+    my ($nodes) = @_;
+    my ($primary);
+
+    ($primary) = map { $nodes->{$_}->{'worker'} }
+                 grep { $nodes->{$_}->{'primary'} > 0 }
+                 keys(%$nodes);
+
+    return deploy_diablo_primary($primary, $POA_PATH);
 }
 
 sub deploy_diablo_quorum_ibft
 {
-    return deploy_diablo_chain(@_, $QUORUMIBFT_CHAIN_PATH);
+    my ($nodes) = @_;
+    my ($primary);
+
+    ($primary) = map { $nodes->{$_}->{'worker'} }
+                 grep { $nodes->{$_}->{'primary'} > 0 }
+                 keys(%$nodes);
+
+    return deploy_diablo_primary($primary, $QUORUMIBFT_PATH);
 }
 
 sub deploy_diablo_quorum_raft
@@ -272,12 +286,26 @@ sub deploy_diablo_quorum_raft
 
 sub deploy_diablo_solana
 {
-    return deploy_diablo_chain(@_, $SOLANA_CHAIN_PATH);
+    my ($nodes) = @_;
+    my ($primary);
+
+    ($primary) = map { $nodes->{$_}->{'worker'} }
+                 grep { $nodes->{$_}->{'primary'} > 0 }
+                 keys(%$nodes);
+
+    return deploy_diablo_primary($primary, $SOLANA_PATH);
 }
 
 sub deploy_diablo_avalanche
 {
-    return deploy_diablo_chain(@_, $AVALANCHE_CHAIN_PATH);
+    my ($nodes) = @_;
+    my ($primary);
+
+    ($primary) = map { $nodes->{$_}->{'worker'} }
+                 grep { $nodes->{$_}->{'primary'} > 0 }
+                 keys(%$nodes);
+
+    return deploy_diablo_primary($primary, $AVALANCHE_PATH);
 }
 
 
@@ -391,24 +419,24 @@ sub deploy_diablo
 	return deploy_diablo_libra($nodes, $primary, \@secondaries);
     }
 
-    if (-f $POA_CHAIN_PATH) {
-	return deploy_diablo_poa($nodes, $primary, \@secondaries);
+    if (-f ($POA_PATH . '/setup.yaml')) {
+	return deploy_diablo_poa($nodes);
     }
 
-    if (-f $QUORUMIBFT_CHAIN_PATH) {
-	return deploy_diablo_quorum_ibft($nodes, $primary, \@secondaries);
+    if (-f ($QUORUMIBFT_PATH . '/setup.yaml')) {
+	return deploy_diablo_quorum_ibft($nodes);
     }
 
     if (-f $QUORUMRAFT_CHAIN_PATH) {
 	return deploy_diablo_quorum_raft($nodes, $primary, \@secondaries);
     }
 
-	if (-f $SOLANA_CHAIN_PATH) {
-	return deploy_diablo_solana($nodes, $primary, \@secondaries);
+	if (-f ($SOLANA_PATH . '/setup.yaml')) {
+	return deploy_diablo_solana($nodes);
     }
 
-	if (-f $AVALANCHE_CHAIN_PATH) {
-	return deploy_diablo_avalanche($nodes, $primary, \@secondaries);
+	if (-f ($AVALANCHE_PATH . '/setup.yaml')) {
+	return deploy_diablo_avalanche($nodes);
     }
 
 

@@ -29,7 +29,7 @@ my $NETWORK_NAME = 'network';
 # Geth accounts (address and private key) generated at install time.
 # These files are on the remote nodes.
 #
-my $KEYS_JSON_PATH = 'install/geth-accounts/accounts.json';
+my $KEYS_YAML_PATH = 'install/geth-accounts/accounts.yaml';
 
 # Where the deployment happens on the workers.
 # Scripts should create and edit files only in this directory to avoid name
@@ -121,17 +121,11 @@ sub get_nodes
     return \%nodes;
 }
 
-sub generate_chainfile
+sub generate_setup
 {
-    my ($dest, $nodes, $accounts) = @_;
-    my ($wfh, $ip, $index, $path, $rfh, $port);
-
-    if (!open($wfh, '>', $dest)) {
-	die ("cannot write '$dest' : $!");
-    }
-
-    printf($wfh "name: ethereum\n");
-    printf($wfh "nodes:\n");
+    my ($nodes, $target, $accounts) = @_;
+    my ($ifh, $ofh, $line, $ip, $i, $port, $worker, %groups, $tags);
+    my ($index, $path, $rfh);
 
     foreach $ip (keys(%$nodes)) {
 	foreach $index (@{$nodes->{$ip}->{'indices'}}) {
@@ -147,12 +141,35 @@ sub generate_chainfile
 		die ("corrupted file '$path' : '$port'");
 	    }
 
-	    printf($wfh "  - %s:%d\n", $ip, $port);
+        $line = sprintf("%s:%d", $ip, $port);
+        $tags = $nodes->{$ip}->{'worker'}->region();
+        push(@{$groups{$tags}}, $line);
 	}
     }
 
-    printf($wfh "key_file: \"%s\"\n", $KEYS_JSON_PATH);
-    close($wfh);
+    if (!open($ofh, '>', $target)) {
+        return 0;
+    }
+
+    printf($ofh "interface: \"ethereum\"\n");
+    printf($ofh "\n");
+    printf($ofh "endpoints:\n");
+
+    foreach $tags (keys(%groups)) {
+        printf($ofh "\n");
+        printf($ofh "  - addresses:\n");
+        foreach $line (@{$groups{$tags}}) {
+            printf($ofh "    - %s\n", $line);
+        }
+        printf($ofh "    tags:\n");
+        foreach $line (split("\n", $tags)) {
+            printf($ofh "    - %s\n", $line);
+        }
+    }
+
+    close($ofh);
+
+    return 1;
 }
 
 
@@ -337,7 +354,7 @@ sub setup_network
 
 sub deploy_poa
 {
-    my ($nodes, $accounts, $genworker, $genesis, $statics);
+    my ($nodes, $accounts, $genworker, $genesis, $statics, $proc);
 
     if (!(-f $ROLES_PATH)) {
 	return 1;
@@ -345,6 +362,14 @@ sub deploy_poa
 
     $nodes = get_nodes($ROLES_PATH);
     $genworker = (values(%$nodes))[0]->{'worker'};
+
+    $proc = $genworker->recv(
+    [ $KEYS_YAML_PATH ],
+    TARGET => $PUBLIC . '/accounts.yaml'
+    );
+    if ($proc->wait() != 0) {
+        die ("cannot receive poa accounts from worker");
+    }
 
     prepare_accounts($nodes);
 
@@ -356,7 +381,7 @@ sub deploy_poa
 
     setup_network($nodes, $statics);
 
-    generate_chainfile($CHAIN_PATH, $nodes, $accounts);
+    generate_setup($nodes, $PUBLIC . '/setup.yaml', $accounts);
 
     return 1;
 }

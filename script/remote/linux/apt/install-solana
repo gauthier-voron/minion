@@ -8,6 +8,9 @@ set -e
 rust_version='1.59.0'
 rust_url="https://static.rust-lang.org/dist/rust-${rust_version}-$(uname -m)-unknown-linux-gnu.tar.gz"
 
+golang_version='1.17.9'
+golang_url="https://go.dev/dl/go${golang_version}.linux-$(dpkg --print-architecture).tar.gz"
+
 solana_url='https://github.com/solana-labs/solana.git'
 solana_checkout='master'
 
@@ -21,17 +24,27 @@ while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ; do
     sleep 5
 done
 
-# Install common utilities, cargo, and Solana build dependencies.
-#
-sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' 'libssl-dev' 'libudev-dev' 'pkg-config' 'zlib1g-dev' 'llvm' 'clang'
-curl -L "${rust_url}" | tar --one-top-level="install/rust${rust_version}install" --strip-components=1 -xzf -
-."/install/rust${rust_version}install/install.sh" --destdir="install/rust${rust_version}" --prefix='' --without=rust-docs --disable-ldconfig
-export PATH="${PWD}/install/rust${rust_version}/bin:${PATH}"
-
 # Create an install dir if not already there.
 #
 if [ ! -e 'install' ] ; then
     mkdir 'install'
+fi
+
+# Install common utilities, cargo, and Solana build dependencies.
+#
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' 'libssl-dev' 'libudev-dev' 'pkg-config' 'zlib1g-dev' 'llvm' 'clang' 'cmake'
+if [ ! -e "install/rust${rust_version}" ] ; then
+	curl -L "${rust_url}" | tar --one-top-level="install/rust${rust_version}install" --strip-components=1 -xzf -
+	."/install/rust${rust_version}install/install.sh" --destdir="install/rust${rust_version}" --prefix='' --without=rust-docs --disable-ldconfig
+fi
+export PATH="${PWD}/install/rust${rust_version}/bin:${PATH}"
+if [ ! -e "install/go${golang_version}" ] ; then
+	curl -L "${golang_url}" | tar --one-top-level="install/go${golang_version}" --strip-components=1 -xzf -
+fi
+export PATH="${PWD}/install/go${golang_version}/bin:${PATH}"
+
+if [ -e 'install/solana' ] ; then
+    sudo rm -rf 'install/solana'
 fi
 
 # Clone Solana from the official repository and build it.
@@ -115,6 +128,4 @@ EOF
     go run 'main.go' accounts.yaml 50000000000 10000
     sed -i '1d' accounts.yaml
     echo "" >> accounts.yaml
-
-    gzip accounts.yaml
 )

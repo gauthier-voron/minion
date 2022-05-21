@@ -134,27 +134,42 @@ sub build_nodefile
     return 1;
 }
 
-sub build_chainfile
+sub generate_setup
 {
-    my ($path, $nodes) = @_;
-    my ($fh, $ip, $i);
-
-    if (!open($fh, '>', $path)) {
-	die ("cannot write chain file '$path' : $!");
-    }
-
-    printf($fh "name: solana\n");
-    printf($fh "nodes:\n");
+    my ($nodes, $target) = @_;
+    my ($ifh, $ofh, $line, $ip, $i, $port, $worker, %groups, $tags);
 
     foreach $ip (keys(%$nodes)) {
-	for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
-	    printf($fh "  - %s:%d\n", $ip, $RPC_TCP_PORT + 2 * $i);
-	}
+        for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
+            $line = sprintf("%s:%d", $ip, $RPC_TCP_PORT + 2 * $i);
+            $tags = $nodes->{$ip}->{'worker'}->region();
+            push(@{$groups{$tags}}, $line);
+        }
     }
 
-    printf($fh "extra:\n  - %d\n  - \"install/solana-accounts/accounts.yaml.gz\"\n", 10000); # extra
+    if (!open($ofh, '>', $target)) {
+        return 0;
+    }
 
-    close($fh);
+    printf($ofh "interface: \"solana\"\n");
+    printf($ofh "\n");
+    printf($ofh "endpoints:\n");
+
+    foreach $tags (keys(%groups)) {
+        printf($ofh "\n");
+        printf($ofh "  - addresses:\n");
+        foreach $line (@{$groups{$tags}}) {
+            printf($ofh "    - %s\n", $line);
+        }
+        printf($ofh "    tags:\n");
+        foreach $line (split("\n", $tags)) {
+            printf($ofh "    - %s\n", $line);
+        }
+    }
+
+    close($ofh);
+
+    return 1;
 }
 
 # Dispatch the content of the given network to the workers.
@@ -241,11 +256,18 @@ sub deploy_solana
     if ($proc->wait() != 0) {
 	die ("cannot receive solana testnet from worker");
     }
+    $proc = $genworker->recv(
+    [ 'install/solana-accounts/accounts.yaml' ],
+    TARGET => $DATA_DIR . '/accounts.yaml'
+    );
+    if ($proc->wait() != 0) {
+        die ("cannot receive algorand accounts from worker");
+    }
 
     system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
 	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
-    build_chainfile($CHAIN_PATH, $nodes);
+    generate_setup($nodes, $DATA_DIR . '/setup.yaml');
 
     dispatch($nodes, $NETWORK_PATH);
 

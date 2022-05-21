@@ -5,8 +5,11 @@
 
 set -e
 
+golang_version='1.17.8'
+golang_url="https://go.dev/dl/go${golang_version}.linux-$(dpkg --print-architecture).tar.gz"
+
 diablo_url='https://github.com/lebdron/diablo-benchmark.git'
-diablo_checkout='solana-sign-online'
+diablo_checkout='v2-solana'
 
 if ! command -v 'sudo' > '/dev/null' ; then
     echo "Cannot find command 'sudo'" >&2
@@ -18,15 +21,19 @@ while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ; do
     sleep 5
 done
 
-# Install common utilities as well as golang.
-#
-sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' 'golang'
-
 # Create an install dir if not already there.
 #
 if [ ! -e 'install' ] ; then
     mkdir 'install'
 fi
+
+# Install common utilities as well as golang.
+#
+sudo -n apt-get -o DPkg::Lock::Timeout=1200 install -yy 'git' 'make' 'gcc'
+if [ ! -e "install/go${golang_version}" ] ; then
+	curl -L "${golang_url}" | tar --one-top-level="install/go${golang_version}" --strip-components=1 -xzf -
+fi
+export PATH="${PWD}/install/go${golang_version}/bin:${PATH}"
 
 if [ -e 'install/diablo' ] ; then
     sudo rm -rf 'install/diablo'
@@ -46,5 +53,10 @@ git clone "${diablo_url}" 'install/diablo'
     #
     export GOPATH="${PWD}/go"
 
+    go mod tidy
+
+    make reqs
     make diablo
+
+    go clean --cache
 )

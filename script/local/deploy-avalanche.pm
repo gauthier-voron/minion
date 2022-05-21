@@ -44,7 +44,7 @@ my $NETWORK_LOC = $DEPLOY_ROOT . '/' . $NETWORK_NAME;
 
 my $KEYS_ROOT = 'install/geth-accounts';
 my $KEYS_TXT_LOC = $KEYS_ROOT . '/accounts.txt';
-my $KEYS_JSON_LOC = $KEYS_ROOT . '/accounts.json';
+my $KEYS_YAML_LOC = $KEYS_ROOT . '/accounts.yaml';
 
 
 # Extract from the given $path the Avalanche nodes.
@@ -137,27 +137,42 @@ sub build_nodefile
     return 1;
 }
 
-sub build_chainfile
+sub generate_setup
 {
-    my ($path, $nodes) = @_;
-    my ($fh, $ip, $i);
-
-    if (!open($fh, '>', $path)) {
-	die ("cannot write chain file '$path' : $!");
-    }
-
-    printf($fh "name: ethereum\n");
-    printf($fh "nodes:\n");
+    my ($nodes, $target) = @_;
+    my ($ifh, $ofh, $line, $ip, $i, $port, $worker, %groups, $tags);
 
     foreach $ip (keys(%$nodes)) {
-	for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
-	    printf($fh "  - %s:%d/ext/bc/C/ws\n", $ip, $API_TCP_PORT + 2*$i);
-	}
+        for ($i = 0; $i < $nodes->{$ip}->{'number'}; $i++) {
+            $line = sprintf("%s:%d/ext/bc/C/ws", $ip, $API_TCP_PORT + 2 * $i);
+            $tags = $nodes->{$ip}->{'worker'}->region();
+            push(@{$groups{$tags}}, $line);
+        }
     }
 
-    printf($fh "key_file: \"%s\"\n", $KEYS_JSON_LOC);
+    if (!open($ofh, '>', $target)) {
+        return 0;
+    }
 
-    close($fh);
+    printf($ofh "interface: \"ethereum\"\n");
+    printf($ofh "\n");
+    printf($ofh "endpoints:\n");
+
+    foreach $tags (keys(%groups)) {
+        printf($ofh "\n");
+        printf($ofh "  - addresses:\n");
+        foreach $line (@{$groups{$tags}}) {
+            printf($ofh "    - %s\n", $line);
+        }
+        printf($ofh "    tags:\n");
+        foreach $line (split("\n", $tags)) {
+            printf($ofh "    - %s\n", $line);
+        }
+    }
+
+    close($ofh);
+
+    return 1;
 }
 
 # Dispatch the content of the given network to the workers.
@@ -245,11 +260,18 @@ sub deploy_avalanche
     if ($proc->wait() != 0) {
 	die ("cannot receive avalanche testnet from worker");
     }
+    $proc = $genworker->recv(
+    [ $KEYS_YAML_LOC ],
+    TARGET => $DATA_DIR . '/accounts.yaml'
+    );
+    if ($proc->wait() != 0) {
+        die ("cannot receive poa accounts from worker");
+    }
 
     system('tar', '--directory=' . $ENV{MINION_PRIVATE}, '-xzf',
 	   $ENV{MINION_PRIVATE} . '/' . $NETWORK_NAME . '.tar.gz');
 
-    build_chainfile($CHAIN_PATH, $nodes);
+    generate_setup($nodes, $DATA_DIR . '/setup.yaml');
 
     dispatch($nodes, $NETWORK_PATH);
 
